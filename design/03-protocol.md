@@ -4,7 +4,7 @@
 
 This document defines the application-level operations and binary frames used by OpenQSP.
 
-The protocol is transport independent. Transport-specific behavior is defined in `04-transports.md`. User identity and stored object semantics are defined in `06-object-model.md`.
+User identity and stored object semantics are defined in `06-object-model.md`.
 
 Version 0.1 is intentionally small and supports private messages and public bulletins.
 
@@ -34,7 +34,7 @@ Every OpenQSP frame starts with this 4-byte header.
 | 2 | 1 | `flags` | Version 0.1 requires `0x00`. |
 | 3 | 1 | `payload_length` | Number of bytes after the header. |
 
-The maximum payload in one version 0.1 Core frame is 255 bytes. A transport may impose a smaller packet size or fragment the frame.
+The maximum payload in one version 0.1 Core frame is 255 bytes.
 
 ---
 
@@ -177,4 +177,3 @@ Only `STORED` and `ALREADY_STORED` complete successful delivery to the receiving
 - Retries must reuse the original identifier and exact content.
 - Receivers must process duplicate submissions idempotently.
 - `STORED` must only be returned after durable storage.
-- Transport-level acknowledgement, retries, fragmentation and addressing are defined by each transport adapter.
