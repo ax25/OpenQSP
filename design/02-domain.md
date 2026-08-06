@@ -1,278 +1,162 @@
-# OpenQSP Domain Model
+# OpenQSP Domain Overview
 
-> This document defines the conceptual entities that exist in OpenQSP.
+## Purpose
 
-It does not describe implementation details, database schemas, APIs or transport-specific packet formats.
+This document describes the domain boundaries and relationships of OpenQSP at a high level.
 
----
+The canonical fields and rules for each object are defined in `06-object-model.md`. Logical client/node operations are defined in `07-client-node-protocol.md`.
 
-# Domain Overview
-
-The initial OpenQSP domain is intentionally small.
-
-Its core entities are:
-
-- User
-- Message
-- Delivery
-- Bulletin
-- Device
-
-`Conversation` is not a core domain entity. Conversations may be derived by clients for presentation purposes, for example by grouping messages by sender, recipient, subject or thread identifier.
-
-`Device` is a synchronization entity rather than a primary communication entity.
-
-```text
-User -------- sender/recipient -------- Message
-                                         |
-                                         |
-                                         v
-                                      Delivery
-
-User ------------------------------- Device
-
-Bulletin is published independently to multiple users.
-```
+This document does not define database tables, APIs, binary encoding, transport framing or implementation details.
 
 ---
 
-# User
+## 1. Domain scope
 
-## Description
+OpenQSP version 0.1 implements the minimum domain required for a persistent amateur-radio BBS.
 
-Represents an amateur radio identity within OpenQSP.
+Its domain concepts are:
 
-A user exists independently of the transport currently being used. The same user may communicate through Internet, APRS, AX.25 Packet, LoRa, VARA or future transports.
-
-## Conceptual Attributes
-
-- Stable internal identifier
-- Amateur radio callsign
-- Profile information
-- Preferences
-- Account status
-
-## Relationships
-
-A user may:
-
-- Send messages
-- Receive messages
-- Own multiple devices
-- Publish or receive bulletins, depending on permissions
-
-A user does not own messages as subordinate objects. A user participates in a message as sender, recipient or another future participant role.
-
----
-
-# Message
-
-## Description
-
-Represents one persistent unit of communication.
-
-A message is independent of the transport used to submit or deliver it.
-
-After the server accepts a message, its communication content is immutable. Corrections or retractions should be represented as new operations rather than silently modifying the accepted content.
-
-## Conceptual Attributes
-
-- Stable unique identifier
-- Sender
-- One or more recipients, if supported by the message type
-- Content
-- Creation time
-- Server acceptance time
-- Priority
-- Message type
-- Optional expiration policy
-
-## Responsibilities
-
-A message represents:
-
-- What was communicated
-- Who originated it
-- Who it is intended for
-
-A message does not represent:
-
-- A specific transport attempt
-- Delivery progress
-- Device synchronization state
-- Presentation grouping
-
-Delivery state is represented by separate `Delivery` entities.
-
----
-
-# Delivery
-
-## Description
-
-Represents one delivery operation for one message toward one destination through one transport.
-
-A message may have multiple deliveries. This allows the same message to be attempted through different transports, retried, or delivered independently to several devices or destinations.
-
-## Conceptual Attributes
-
-- Stable unique identifier
-- Message reference
-- Destination
-- Selected transport
-- Current state
-- Attempt count
-- Creation time
-- Last attempt time
-- Confirmation time, when applicable
-- Failure information, when applicable
-
-## Example
-
-```text
-Message M-105
-
-├── Delivery D-1 → EA4ABC via Internet → delivered
-├── Delivery D-2 → EA4ABC via APRS     → queued
-└── Delivery D-3 → EA4ABC via Packet   → failed
-```
-
-## Responsibilities
-
-A delivery represents:
-
-- How a message is being delivered
-- Where it is being delivered
-- The progress and outcome of that delivery
-
-A delivery does not modify the meaning or content of the message.
-
----
-
-# Bulletin
-
-## Description
-
-Represents persistent published information intended for multiple users rather than a private recipient.
-
-Bulletins may belong to a topic, channel or category and are normally discovered through compact listings before their full content is requested.
-
-## Conceptual Attributes
-
-- Stable unique identifier
-- Publisher
-- Title
-- Content
-- Category or channel
-- Publication time
-- Priority
-- Optional expiration time
-
-## Responsibilities
-
-A bulletin represents published information.
-
-The mechanism used to list, request, synchronize or transport bulletins belongs to the protocol and transport layers, not to the bulletin entity itself.
-
----
-
-# Device
-
-## Description
-
-Represents one client installation or endpoint participating in synchronization for a user.
-
-Examples include:
-
-- An Android application installation
-- An iOS application installation
-- A Windows client
-- A Linux client
-- A web client session, if persistent device identity is required
-
-## Conceptual Attributes
-
-- Stable device identifier
-- User reference
-- Device name or label
-- Client type
-- Last synchronization position
-- Last known activity
-- Notification or delivery capabilities
-
-## Responsibilities
-
-A device tracks synchronization-specific state, such as which changes have already been received.
-
-A device does not define the user's identity and is not the destination of a radio message unless a future protocol feature explicitly targets individual devices.
-
----
-
-# Relationships
+- `User`;
+- `Node`;
+- `Message`;
+- `Bulletin`.
 
 ```text
                          +-------------+
                          |    User     |
                          +------+------+ 
                                 |
-                    owns        |        participates as
-                                |        sender/recipient
-                                v                 |
-                         +-------------+          |
-                         |   Device    |          |
-                         +-------------+          v
-                                           +-------------+
-                                           |   Message   |
-                                           +------+------+ 
-                                                  |
-                                      delivered through
-                                                  |
-                                                  v
-                                           +-------------+
-                                           |  Delivery   |
-                                           +-------------+
-
-                         +-------------+
-                         |  Bulletin   |
-                         +-------------+
+                    authors     |     receives
+                                |
+                  +-------------+-------------+
+                  |                           |
+                  v                           v
+           +-------------+             +-------------+
+           |   Message   |             |  Bulletin   |
+           +------+------+             +-------------+
+                  |
+             stored by
+                  |
+                  v
+           +-------------+
+           |    Node     |
+           +-------------+
 ```
 
----
-
-# Domain Rules
-
-- Every core entity has a stable identifier independent of transport.
-- A message and its deliveries are separate entities.
-- A message may exist before any delivery is created.
-- Multiple deliveries may refer to the same message.
-- Transport-specific state belongs to `Delivery`, not `Message`.
-- Client presentation groupings do not alter the domain model.
-- Devices maintain synchronization state independently.
-- Clients may create and persist data while offline until synchronization is possible.
-- Once accepted by the server, shared system state is coordinated by the server.
+The initial domain intentionally does not include conversations, threads, devices, delivery-attempt objects, presence, groups or federation peers.
 
 ---
 
-# Deferred Entities
+## 2. User
 
-The following concepts may be introduced later if they become necessary:
+A `User` is one OpenQSP identity represented by a normalized amateur-radio callsign.
 
-- Attachment
-- Channel
-- Group
-- Presence
-- Notification
-- Federation peer
-- Thread or conversation identifier
+The user exists independently of the transport used to reach a node. APRS SSIDs and operating suffixes such as `/P` or `/M` do not create separate users or mailboxes.
 
-They are intentionally excluded from the initial model to keep the domain small and avoid designing features before they are required.
+A user may:
+
+- send private messages;
+- receive private messages;
+- publish bulletins when permitted;
+- access the same mailbox through different clients or transports.
+
+Authentication and transport-address resolution are outside the domain model.
 
 ---
 
-# Open Questions
+## 3. Node
 
-- Whether messages support multiple recipients in the first protocol version.
-- Whether callsigns are permanent user identifiers or mutable identity attributes.
-- How secondary station identifiers and SSIDs relate to a user.
-- Whether bulletin channels are entities or simple bulletin attributes.
-- Whether message expiration removes content or only stops further delivery attempts.
+A `Node` is the BBS endpoint with which clients communicate.
+
+A node:
+
+- accepts and validates objects;
+- stores messages and bulletins durably;
+- makes stored objects available to users;
+- answers synchronization and retrieval requests;
+- coordinates transport adapters.
+
+A node is not a user and does not gain a user mailbox merely because it operates under an amateur-radio callsign.
+
+Federation and synchronization between nodes are outside the scope of version 0.1.
+
+---
+
+## 4. Message
+
+A `Message` is one persistent private text object sent from one user to another.
+
+A message:
+
+- has exactly one author and one recipient in version 0.1;
+- has no title, subject, conversation identifier or thread identifier;
+- is independent of the transport used to submit or retrieve it;
+- is immutable after creation;
+- is downloaded in full.
+
+Retries reuse the same object identifier and identical content. A correction is represented by a new message.
+
+Transport attempts, link acknowledgements, retry counters and temporary routing state are operational concerns and are not separate domain entities in version 0.1.
+
+---
+
+## 5. Bulletin
+
+A `Bulletin` is one persistent public news object.
+
+A bulletin:
+
+- has one author;
+- has a mandatory title;
+- has a body;
+- has no private recipient;
+- is immutable after creation.
+
+Clients normally discover bulletins through compact headers and request complete bodies separately. That retrieval behaviour belongs to the client/node protocol rather than to the bulletin object itself.
+
+---
+
+## 6. Relationships
+
+The principal relationships are:
+
+- a user authors messages;
+- a message is addressed to one user;
+- a user authors bulletins;
+- a node stores messages and bulletins;
+- clients act on behalf of a user when communicating with a node.
+
+Clients and transports participate in communication but are not persistent domain entities in version 0.1.
+
+---
+
+## 7. Domain rules
+
+- One normalized base callsign represents one OpenQSP user.
+- Objects use stable identifiers independent of transport.
+- Version 0.1 objects are `Message` and `Bulletin`.
+- Stored object content is immutable.
+- A private message belongs to the recipient user's mailbox, not to a device or transport address.
+- A bulletin is public and has no recipient.
+- Transport-specific state does not alter object meaning.
+- Client presentation groupings do not create domain entities.
+- The node becomes authoritative for an object after accepting and durably storing it.
+
+---
+
+## 8. Explicitly excluded from version 0.1
+
+The following concepts are not part of the initial domain:
+
+- `Device`;
+- `Delivery` as a persistent domain object;
+- conversation or thread;
+- synchronized read state;
+- message editing or deletion;
+- attachments or files;
+- channels and groups;
+- presence;
+- node federation;
+- node-to-node synchronization.
+
+They may be introduced later only when a concrete protocol or product requirement justifies them.
