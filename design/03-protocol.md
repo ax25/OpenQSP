@@ -6,6 +6,8 @@ This document defines the application-level operations and binary frames used by
 
 User identity and stored object semantics are defined in `06-object-model.md`.
 
+Logical command semantics and client/node flows are defined in `07-client-node-protocol.md`.
+
 Version 0.1 is intentionally small and supports private messages and public bulletins.
 
 ---
