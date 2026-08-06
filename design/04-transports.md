@@ -25,17 +25,17 @@ These mechanisms are separate from `ACK_OBJECT`, which confirms an application-l
 
 ---
 
-## 2. Internet transport
+## 2. Internet
 
-Internet transports such as TCP or WebSocket may maintain a persistent connection.
+Internet transports such as TCP or WebSocket may maintain a persistent connection. The transport maps each complete OpenQSP frame to an ordered, reliable byte stream or message and preserves frame boundaries when required by the underlying API.
 
 While the connection is available, the server may deliver new messages or bulletin notifications immediately without waiting for a new `GET` request.
 
-Connection authentication, keepalive and reconnection policy are implementation concerns and will be specified when the Internet transport is implemented.
+Connection authentication, frame encapsulation, keepalive, reconnection and connection-lifetime policy are implementation concerns and will be specified when the Internet transport is implemented. A connection is not an OpenQSP user identity, and opening or closing one does not alter stored objects.
 
 ---
 
-## 3. APRS transport
+## 3. APRS
 
 APRS is a low-bandwidth, connectionless transport. OpenQSP must minimize unnecessary polling while still allowing timely delivery of new information.
 
@@ -47,24 +47,28 @@ The SSID is transport addressing only. It does not create a separate OpenQSP use
 
 A node may remember the most recently usable APRS address for an OpenQSP user in order to deliver frames, but that address is not stored inside messages or bulletins.
 
-### 3.2 Active user state
+### 3.2 User activity
 
-Each node maintains a local, temporary activity record for users communicating through APRS.
+Each node maintains a temporary activity timer for each user communicating through APRS. This timer is operational state in the APRS transport layer, not a session or presence protocol.
 
-A successfully received and valid OpenQSP request from a user refreshes that user's APRS activity timer. Examples include:
+User activity is inferred from normal protocol usage. Any valid request received from a user refreshes that user's activity timer. Examples include, but are not limited to:
 
 - `GET_MESSAGES`;
-- `GET_BULLETIN_HEADERS`;
+- `GET_BULLETINS` or the version 0.1 `GET_BULLETIN_HEADERS` operation;
 - `GET_BULLETIN`;
 - `SEND_MESSAGE`;
 - `POST_BULLETIN`;
-- acknowledgements or other valid responses.
+- `ACK` or another valid client acknowledgement request.
+
+This list is illustrative only. Any future valid client request also refreshes activity unless that operation is explicitly documented otherwise.
+
+Frames originated by the node, including `MESSAGE`, `BULLETIN`, `NEW_MESSAGE` or `NEW_BULLETIN` notifications, **MUST NOT** refresh user activity. Only receipt of a valid client request can refresh the timer; malformed, rejected or unrelated transport traffic cannot do so.
 
 The exact timeout is configurable and is not fixed in version 0.1.
 
 ### 3.3 Proactive delivery while active
 
-While a user's APRS activity timer remains valid, the node may send newly available information to that user without requiring another explicit polling request.
+While a user's APRS activity timer remains valid, the node **MAY** proactively send newly available information to that user without requiring another explicit polling request.
 
 This may include, according to node policy:
 
@@ -78,13 +82,13 @@ Version 0.1 does not define subscriptions. Being active only makes proactive del
 
 If the node sends a proactive APRS delivery and receives no required response or acknowledgement, it may retry according to APRS policy.
 
-After the configured timeout, failed delivery policy or both, the node stops treating the user as active and stops unsolicited delivery.
+When the activity timer expires, the node stops treating the user as active and stops sending unsolicited updates. Delivery of information in response to an explicit request is unaffected.
 
 The next valid request from that user makes the user active again.
 
 ### 3.5 Local state only
 
-APRS activity is local operational state of one node.
+APRS activity is **LOCAL TO EACH NODE** and **MUST NEVER** be synchronized between nodes. It belongs to the APRS transport layer and is not part of the Object Model.
 
 It is not:
 
