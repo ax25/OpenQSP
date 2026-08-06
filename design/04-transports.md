@@ -53,8 +53,8 @@ Each node maintains a temporary activity timer for each user communicating throu
 
 User activity is inferred from normal protocol usage. Any valid request received from a user refreshes that user's activity timer. Examples include, but are not limited to:
 
-- `GET_MESSAGES`;
-- `GET_BULLETINS` or the version 0.1 `GET_BULLETIN_HEADERS` operation;
+- `GET_NEW_MESSAGES`;
+- `GET_NEW_BULLETINS`;
 - `GET_BULLETIN`;
 - `SEND_MESSAGE`;
 - `POST_BULLETIN`;
@@ -72,8 +72,8 @@ While a user's APRS activity timer remains valid, the node **MAY** proactively s
 
 This may include, according to node policy:
 
-- newly arrived private messages;
-- notice that new bulletin headers are available;
+- complete newly arrived private messages;
+- new bulletin headers;
 - other version-compatible novelty notifications defined later.
 
 Version 0.1 does not define subscriptions. Being active only makes proactive delivery possible; node policy decides which novelties are sent.
