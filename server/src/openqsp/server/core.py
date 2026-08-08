@@ -137,7 +137,7 @@ class ServerCore:
             ]
 
         try:
-            outcome = self._message_store.store_message(
+            self._message_store.store_message(
                 created_at=request.created_at,
                 author=author,
                 recipient=request.recipient,
@@ -243,9 +243,7 @@ class ServerCore:
             ]
 
         try:
-            validate_callsign(
-                context.authenticated_callsign, "authenticated_callsign"
-            )
+            validate_callsign(context.authenticated_callsign, "authenticated_callsign")
         except InvalidFieldError:
             return [
                 Error(
@@ -309,9 +307,7 @@ class ServerCore:
             ]
 
         try:
-            validate_callsign(
-                context.authenticated_callsign, "authenticated_callsign"
-            )
+            validate_callsign(context.authenticated_callsign, "authenticated_callsign")
         except InvalidFieldError:
             return [
                 Error(
@@ -322,9 +318,7 @@ class ServerCore:
             ]
 
         try:
-            bulletin = self._bulletin_store.get_bulletin(
-                sequence=request.sequence
-            )
+            bulletin = self._bulletin_store.get_bulletin(sequence=request.sequence)
         except StorageIntegrityError:
             return [
                 Error(

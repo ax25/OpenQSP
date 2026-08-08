@@ -1,0 +1,139 @@
+"""Run the M4.4 incremental private-mailbox synchronization scenario."""
+
+from __future__ import annotations
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+
+TOOLS_ROOT = Path(__file__).resolve().parents[1]
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+from client_sim import completed_cursor
+from scenario_environment import (
+    LocalScenarioEnvironment,
+    ScenarioClient,
+    ScenarioEnvironment,
+)
+from openqsp.protocol import (
+    End,
+    GetNewMessages,
+    Message,
+    Operation,
+    ProtocolObject,
+    SendMessage,
+    Stored,
+)
+
+RECIPIENT = "EA3BBB"
+OTHER_RECIPIENT = "EA3ZZZ"
+SYNC_LIMIT = 20
+MESSAGE_A = SendMessage(1786300001, RECIPIENT, "M4.4 message A")
+OTHER_MESSAGE = SendMessage(1786300002, OTHER_RECIPIENT, "M4.4 isolated message")
+MESSAGE_B = SendMessage(1786300003, RECIPIENT, "M4.4 message B")
+MESSAGE_C = SendMessage(1786300004, RECIPIENT, "M4.4 message C")
+MESSAGE_D = SendMessage(1786300005, RECIPIENT, "M4.4 message D")
+
+
+@dataclass(frozen=True)
+class ScenarioResult:
+    """Decoded production responses and END-derived cursors from M4.4."""
+
+    initial_sends: list[list[ProtocolObject]]
+    first_sync: list[ProtocolObject]
+    first_cursor: int
+    later_sends: list[list[ProtocolObject]]
+    second_sync: list[ProtocolObject]
+    second_cursor: int
+    third_sync: list[ProtocolObject]
+
+
+def _send(
+    clients: dict[str, ScenarioClient], author: str, message: SendMessage
+) -> list[ProtocolObject]:
+    responses = clients[author].request(message)
+    expected = [Stored()]
+    if responses != expected:
+        raise AssertionError(f"expected STORED, got {responses!r}")
+    return responses
+
+
+def _cursor(responses: list[ProtocolObject]) -> int:
+    cursor = completed_cursor(responses, Operation.GET_NEW_MESSAGES)
+    if cursor is None:
+        raise AssertionError("mailbox synchronization did not end with a valid END")
+    return cursor
+
+
+def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
+    """Synchronize one mailbox three times using only public Core interfaces."""
+    authors = ("EA3AAA", "EA3CCC", "EA3DDD")
+    clients = {callsign: env.client(callsign) for callsign in authors}
+    recipient = env.client(RECIPIENT)
+    initial_sends = [
+        _send(clients, "EA3AAA", MESSAGE_A),
+        _send(clients, "EA3AAA", OTHER_MESSAGE),
+        _send(clients, "EA3CCC", MESSAGE_B),
+    ]
+    first_sync = recipient.request(GetNewMessages(0, SYNC_LIMIT))
+    first_cursor = _cursor(first_sync)
+    later_sends = [
+        _send(clients, "EA3AAA", MESSAGE_C),
+        _send(clients, "EA3DDD", MESSAGE_D),
+    ]
+    second_sync = recipient.request(GetNewMessages(first_cursor, SYNC_LIMIT))
+    second_cursor = _cursor(second_sync)
+    third_sync = recipient.request(GetNewMessages(second_cursor, SYNC_LIMIT))
+    return ScenarioResult(
+        initial_sends,
+        first_sync,
+        first_cursor,
+        later_sends,
+        second_sync,
+        second_cursor,
+        third_sync,
+    )
+
+
+def _describe(response: ProtocolObject) -> str:
+    if isinstance(response, Stored):
+        return "STORED"
+    if isinstance(response, Message):
+        return f"MESSAGE sequence={response.sequence} author={response.author} recipient={response.recipient} body={response.body!r}"
+    if isinstance(response, End):
+        return f"END returned={response.returned_count} next_since={response.next_since} has_more={response.has_more}"
+    return repr(response)
+
+
+def _print_responses(label: str, responses: list[ProtocolObject]) -> None:
+    print(label)
+    for response in responses:
+        print(f"  {_describe(response)}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if len(argv) != 1:
+        print("usage: incremental_mailbox_sync.py DATABASE", file=sys.stderr)
+        return 2
+    result = run_scenario(LocalScenarioEnvironment(argv[0]))
+    print("Initial messages sent: A and B to EA3BBB; isolated message to EA3ZZZ")
+    for responses in result.initial_sends:
+        _print_responses("send", responses)
+    _print_responses("First sync: EA3BBB since=0", result.first_sync)
+    print(f"Cursor obtained from first END: {result.first_cursor}\n")
+    print("New messages sent: C and D to EA3BBB")
+    for responses in result.later_sends:
+        _print_responses("send", responses)
+    _print_responses(
+        f"Second sync: EA3BBB since={result.first_cursor}", result.second_sync
+    )
+    print(f"Cursor obtained from second END: {result.second_cursor}\n")
+    _print_responses(
+        f"Third sync (empty): EA3BBB since={result.second_cursor}", result.third_sync
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -108,7 +108,9 @@ class OpenQSPClient:
         try:
             sock = socket.create_connection((self.host, self.port), self.timeout)
         except OSError as error:
-            raise ClientError(f"cannot connect to {self.host}:{self.port}: {error}") from error
+            raise ClientError(
+                f"cannot connect to {self.host}:{self.port}: {error}"
+            ) from error
         sock.settimeout(None)
         self._socket = sock
         self._failure = None
@@ -125,7 +127,9 @@ class OpenQSPClient:
         if self.callsign is not None:
             raise ClientError("client is already authenticated")
         if password:
-            raise AuthenticationError("this server transport does not support passwords")
+            raise AuthenticationError(
+                "this server transport does not support passwords"
+            )
         try:
             validate_callsign(callsign)
         except InvalidFieldError as error:
@@ -135,10 +139,16 @@ class OpenQSPClient:
             response = self._read_line(MAX_HANDSHAKE_SIZE)
         except OSError as error:
             self.close()
-            raise ConnectionClosedError(f"connection failed during authentication: {error}") from error
+            raise ConnectionClosedError(
+                f"connection failed during authentication: {error}"
+            ) from error
         if response != HANDSHAKE_OK:
             self.close()
-            detail = "server rejected callsign" if response == HANDSHAKE_ERROR else "invalid handshake response"
+            detail = (
+                "server rejected callsign"
+                if response == HANDSHAKE_ERROR
+                else "invalid handshake response"
+            )
             raise AuthenticationError(detail)
         self.callsign = callsign
         self._reader = threading.Thread(
@@ -160,18 +170,28 @@ class OpenQSPClient:
             raise ClientError("server returned an unexpected SEND_MESSAGE response")
         return responses[0]
 
-    def get_messages(self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX) -> tuple[list[Message], End]:
+    def get_messages(
+        self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX
+    ) -> tuple[list[Message], End]:
         responses = self.request(GetNewMessages(since, maximum))
         end = responses[-1] if responses else None
-        if not isinstance(end, End) or any(not isinstance(item, Message) for item in responses[:-1]):
+        if not isinstance(end, End) or any(
+            not isinstance(item, Message) for item in responses[:-1]
+        ):
             raise ClientError("server returned an unexpected GET_NEW_MESSAGES response")
         return list(responses[:-1]), end
 
-    def get_bulletins(self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX) -> tuple[list[BulletinHeader], End]:
+    def get_bulletins(
+        self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX
+    ) -> tuple[list[BulletinHeader], End]:
         responses = self.request(GetNewBulletins(since, maximum))
         end = responses[-1] if responses else None
-        if not isinstance(end, End) or any(not isinstance(item, BulletinHeader) for item in responses[:-1]):
-            raise ClientError("server returned an unexpected GET_NEW_BULLETINS response")
+        if not isinstance(end, End) or any(
+            not isinstance(item, BulletinHeader) for item in responses[:-1]
+        ):
+            raise ClientError(
+                "server returned an unexpected GET_NEW_BULLETINS response"
+            )
         return list(responses[:-1]), end
 
     def get_bulletin(self, sequence: int) -> Bulletin:
@@ -193,7 +213,9 @@ class OpenQSPClient:
         with self._request_lock:
             with self._condition:
                 if not self.authenticated or self._failure is not None:
-                    raise self._failure or ConnectionClosedError("client is not authenticated")
+                    raise self._failure or ConnectionClosedError(
+                        "client is not authenticated"
+                    )
                 self._pending_operation = operation
                 self._responses = []
             try:
@@ -312,8 +334,14 @@ class OpenQSPClient:
             return True
         if self._pending_operation == Operation.SEND_MESSAGE:
             return isinstance(last, Stored)
-        if self._pending_operation in (Operation.GET_NEW_MESSAGES, Operation.GET_NEW_BULLETINS):
-            return isinstance(last, End) and last.request_operation == self._pending_operation
+        if self._pending_operation in (
+            Operation.GET_NEW_MESSAGES,
+            Operation.GET_NEW_BULLETINS,
+        ):
+            return (
+                isinstance(last, End)
+                and last.request_operation == self._pending_operation
+            )
         if self._pending_operation == Operation.GET_BULLETIN:
             return isinstance(last, Bulletin)
         return False

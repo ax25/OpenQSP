@@ -30,7 +30,9 @@ def format_object(obj: ProtocolObject) -> str:
     if isinstance(obj, Message):
         return f"[{obj.sequence}] {_format_time(obj.created_at)} {obj.author} -> {obj.recipient}: {obj.body}"
     if isinstance(obj, BulletinHeader):
-        return f"[{obj.sequence}] {_format_time(obj.created_at)} {obj.author}: {obj.title}"
+        return (
+            f"[{obj.sequence}] {_format_time(obj.created_at)} {obj.author}: {obj.title}"
+        )
     if isinstance(obj, Bulletin):
         return f"[{obj.sequence}] {obj.title}\nFrom: {obj.author} ({_format_time(obj.created_at)})\n{obj.body}"
     return str(obj)
@@ -58,9 +60,15 @@ class CommandSession:
             return False, ""
         if command == "status" and not args:
             host, port = self.client.endpoint
-            return True, f"Connected: {'yes' if self.client.connected else 'no'}\nAuthenticated: {self.client.callsign or 'no'}\nServer: {host}:{port}"
+            return (
+                True,
+                f"Connected: {'yes' if self.client.connected else 'no'}\nAuthenticated: {self.client.callsign or 'no'}\nServer: {host}:{port}",
+            )
         if command == "services" and not args:
-            return True, "SEND_MESSAGE, GET_NEW_MESSAGES, GET_NEW_BULLETINS, GET_BULLETIN\n(Server capability discovery is not defined in protocol version 0.1.)"
+            return (
+                True,
+                "SEND_MESSAGE, GET_NEW_MESSAGES, GET_NEW_BULLETINS, GET_BULLETIN\n(Server capability discovery is not defined in protocol version 0.1.)",
+            )
         if command in ("messages", "new") and not args:
             since = 0 if command == "messages" else self.message_cursor
             messages, end = self.client.get_messages(since)
@@ -79,8 +87,22 @@ class CommandSession:
             except ValueError:
                 return True, "Usage: read <sequence>"
             return True, format_object(self.client.get_bulletin(sequence))
-        if command in {"help", "quit", "status", "services", "messages", "new", "send", "bulletins", "read"}:
-            usage = next(line.strip() for line in COMMAND_HELP.splitlines() if line.strip().startswith(command))
+        if command in {
+            "help",
+            "quit",
+            "status",
+            "services",
+            "messages",
+            "new",
+            "send",
+            "bulletins",
+            "read",
+        }:
+            usage = next(
+                line.strip()
+                for line in COMMAND_HELP.splitlines()
+                if line.strip().startswith(command)
+            )
             return True, f"Usage: {usage}"
         return True, f"Unknown command: {parts[0]}. Type 'help' for commands."
 
