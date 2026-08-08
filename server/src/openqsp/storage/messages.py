@@ -8,30 +8,21 @@ import time
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
-from enum import Enum
 
+from ._common import (
+    MAX_SQLITE_INTEGER,
+    MAX_U64,
+    SequenceExhaustedError,
+    StorageIntegrityError,
+    StoreOutcome,
+    StoreResult,
+    length_prefixed,
+    require_u64,
+)
 from .database import Database
 from .migrations import decode_u64, encode_u64
 
-MAX_U64 = 0xFFFF_FFFF_FFFF_FFFF
-MAX_SQLITE_INTEGER = 0x7FFF_FFFF_FFFF_FFFF
 MAX_RETRIEVAL_LIMIT = 20
-
-
-class StoreResult(Enum):
-    """Business outcomes from attempting to persist an immutable object."""
-
-    STORED = "stored"
-    ALREADY_STORED = "already_stored"
-    CONFLICT = "conflict"
-
-
-@dataclass(frozen=True)
-class StoreOutcome:
-    """Result of storage, including the stable sequence when applicable."""
-
-    result: StoreResult
-    sequence: int | None
 
 
 @dataclass(frozen=True)
@@ -59,14 +50,6 @@ class InvalidCursorError(ValueError):
     """Raised when a cursor is ahead of the node's global message stream."""
 
 
-class SequenceExhaustedError(RuntimeError):
-    """Raised when no further values exist in a u64 sequence space."""
-
-
-class StorageIntegrityError(RuntimeError):
-    """Raised when persisted rows violate the storage schema's invariants."""
-
-
 def message_content_hash(
     *, message_id: int, created_at: int, author: str, recipient: str, body: bytes
 ) -> bytes:
@@ -82,9 +65,9 @@ def message_content_hash(
         b"OpenQSP\x00message-content\x00v1",
         encode_u64(message_id),
         encode_u64(created_at),
-        _length_prefixed(encoded_author),
-        _length_prefixed(encoded_recipient),
-        _length_prefixed(body),
+        length_prefixed(encoded_author),
+        length_prefixed(encoded_recipient),
+        length_prefixed(body),
     )
     return hashlib.sha256(b"".join(parts)).digest()
 
@@ -108,7 +91,7 @@ class MessageStore:
         check and the paginated query on one consistent SQLite snapshot.
         """
 
-        _require_u64("since", since)
+        require_u64("since", since)
         if (
             not isinstance(limit, int)
             or isinstance(limit, bool)
@@ -170,8 +153,8 @@ class MessageStore:
         represented by the storage schema.
         """
 
-        _require_u64("message_id", message_id)
-        _require_u64("created_at", created_at)
+        require_u64("message_id", message_id)
+        require_u64("created_at", created_at)
         if created_at > MAX_SQLITE_INTEGER:
             raise ValueError("created_at cannot be represented by SQLite INTEGER")
         if not isinstance(author, str) or not isinstance(recipient, str):
@@ -289,15 +272,6 @@ class MessageStore:
                 StoreResult.ALREADY_STORED, decode_u64(row["sequence"])
             )
         return StoreOutcome(StoreResult.CONFLICT, None)
-
-
-def _length_prefixed(value: bytes) -> bytes:
-    return len(value).to_bytes(8, "big") + value
-
-
-def _require_u64(name: str, value: int) -> None:
-    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= MAX_U64:
-        raise ValueError(f"{name} must be an unsigned 64-bit integer")
 
 
 def _decode_stored_u64(value: object, *, field: str) -> int:
