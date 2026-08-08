@@ -34,6 +34,26 @@ from openqsp.server import ServerCore  # noqa: E402
 from openqsp.storage import BulletinStore, Database, MessageStore  # noqa: E402
 
 
+class LocalCoreClient:
+    """One authenticated user of a local node's public Core interface.
+
+    The class deliberately owns no protocol or storage behaviour: it only
+    performs the same encode, handle, and decode steps as the command-line
+    simulator.  Sharing a ``ServerCore`` between instances makes multi-user
+    development scenarios explicit without bypassing the wire protocol.
+    """
+
+    def __init__(self, core: ServerCore, callsign: str) -> None:
+        self._core = core
+        self.callsign = callsign
+
+    def request(self, request: ProtocolObject) -> list[ProtocolObject]:
+        """Send one production-encoded request as this authenticated user."""
+        request_frame = encode_frame(request)
+        response_frames = self._core.handle_frame(self.callsign, request_frame)
+        return decode_responses(response_frames)
+
+
 def parse_integer(value: str) -> int:
     """Parse decimal and 0x-prefixed integer arguments."""
     try:
@@ -185,8 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         core = ServerCore(
             message_store=MessageStore(database), bulletin_store=bulletin_store
         )
-        request_frame = encode_frame(_request(args))
-        responses = decode_responses(core.handle_frame(args.callsign, request_frame))
+        responses = LocalCoreClient(core, args.callsign).request(_request(args))
     except (ProtocolError, TypeError, ValueError) as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

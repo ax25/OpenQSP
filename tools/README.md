@@ -149,6 +149,17 @@ node_restart
 bulletin_sync
 ```
 
+The first implemented scenario is the M4.1 multi-user private-message flow.
+It sends as `EA3AAA`, retrieves as `EA3BBB`, and also verifies that neither
+the sender nor `EA3CCC` can read the recipient's message:
+
+```bash
+python tools/scenarios/multi_user_private_message.py /tmp/openqsp-m4.1.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this single-send scenario.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
@@ -215,11 +226,13 @@ The two layers should share production code and canonical fixtures rather than d
 
 ## 7. Current status
 
-The protocol laboratory and local logical client are available:
+The protocol laboratory, local logical client, and first multi-user scenario
+are available:
 
 ```text
 tools/frame_tool.py
 tools/client_sim.py
+tools/scenarios/multi_user_private_message.py
 ```
 
 They use the production protocol codec directly; the client simulator also

@@ -171,6 +171,11 @@ Completion of this milestone defines the first functioning OpenQSP node core.
 
 **Status: planned**
 
+M4.1 provides the first required scenario: two authenticated test users
+exchange one private message through the production codec, server core, and
+persistent store, with automated checks for mailbox isolation. The remaining
+Milestone 4 scenarios and acceptance criteria are still planned.
+
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
 Required scenarios include at least:
