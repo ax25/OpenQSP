@@ -173,6 +173,19 @@ python tools/scenarios/message_retry_after_lost_ack.py /tmp/openqsp-m4.2.db
 Use a new database path (or remove the previous laboratory database) before
 repeating this scenario.
 
+The M4.3 scenario stores one message, then submits the same object identifier,
+authenticated sender, recipient, and timestamp with only the body changed. It
+expects the existing `CONFLICT` acknowledgement and synchronizes twice to show
+that the original body and sequence remain intact, with no duplicate or new
+sequence:
+
+```bash
+python tools/scenarios/message_id_conflict.py /tmp/openqsp-m4.3.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this scenario.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
@@ -247,6 +260,7 @@ tools/frame_tool.py
 tools/client_sim.py
 tools/scenarios/multi_user_private_message.py
 tools/scenarios/message_retry_after_lost_ack.py
+tools/scenarios/message_id_conflict.py
 ```
 
 They use the production protocol codec directly; the client simulator also
