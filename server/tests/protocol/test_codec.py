@@ -1,7 +1,7 @@
 import pytest
 
 from openqsp.protocol import codec
-from openqsp.protocol.codec import decode_frame, encode_frame
+from openqsp.protocol.codec import decode_frame, decode_frame_with_flags, encode_frame
 from openqsp.protocol.constants import MAX_FRAME_SIZE, Operation
 from openqsp.protocol.errors import (
     InvalidFieldError,
@@ -10,7 +10,7 @@ from openqsp.protocol.errors import (
     UnknownOperationError,
     UnsupportedVersionError,
 )
-from openqsp.protocol.models import GetBulletin
+from openqsp.protocol.models import GetBulletin, Message
 
 
 GET_BULLETIN_FRAME = bytes.fromhex(
@@ -45,6 +45,22 @@ def test_unknown_operation_uses_specific_exception() -> None:
 def test_nonzero_version_01_flags_are_invalid() -> None:
     with pytest.raises(InvalidFieldError):
         decode_frame(bytes.fromhex("01 04 01 08 11 12 13 14 15 16 17 18"))
+
+
+def test_unsolicited_flag_round_trips_only_through_server_frame_decoder() -> None:
+    message = Message(1, 2, 3, "EA3AAA", "EA3BBB", "proactive")
+    frame = encode_frame(message, unsolicited=True)
+    assert frame[2] == 1
+    assert decode_frame_with_flags(frame) == (message, 1)
+    with pytest.raises(InvalidFieldError):
+        decode_frame(frame)
+
+
+def test_unsolicited_flag_is_rejected_for_ineligible_operation() -> None:
+    with pytest.raises(InvalidFieldError, match="only for"):
+        decode_frame_with_flags(
+            bytes.fromhex("01 04 01 08 11 12 13 14 15 16 17 18")
+        )
 
 
 def test_declared_payload_larger_than_available_bytes() -> None:

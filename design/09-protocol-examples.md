@@ -12,7 +12,9 @@ Unless stated otherwise:
 - multi-byte integers use big-endian order;
 - text is UTF-8;
 - frame bytes include the 4-byte Core header;
-- every example uses protocol version `0x01` and flags `0x00`.
+- every request/response example uses protocol version `0x01` and flags
+  `0x00`; proactive `MESSAGE` and `BULLETIN_HEADER` deliveries use the
+  `UNSOLICITED` flag `0x01`.
 
 ---
 
@@ -439,6 +441,10 @@ Expected result:
 ```text
 ERROR / INVALID_FRAME
 ```
+
+The frame remains invalid because `UNSOLICITED` is not permitted on
+`GET_BULLETIN`. The `0x01` flag is valid only on node-originated proactive
+`MESSAGE` and `BULLETIN_HEADER` frames.
 
 ### 15.3 Declared payload longer than actual payload
 

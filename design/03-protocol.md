@@ -33,7 +33,7 @@ Every OpenQSP Core frame starts with this 4-byte header.
 |-------:|-----:|-------|-------------|
 | 0 | 1 | `version` | Protocol version. Version 0.1 uses `0x01`. |
 | 1 | 1 | `operation` | Operation code. |
-| 2 | 1 | `flags` | Version 0.1 requires `0x00`. |
+| 2 | 1 | `flags` | `0x00`, or `0x01` for an unsolicited node delivery. |
 | 3 | 1 | `payload_length` | Number of bytes after the header. |
 
 The maximum payload of one version 0.1 Core frame is 255 bytes. The maximum complete Core-frame size is therefore 259 bytes.
@@ -46,7 +46,9 @@ A receiver must reject a frame when:
 
 - `version` is not `0x01`;
 - `operation` is unknown for version 0.1;
-- `flags` is not `0x00`;
+- an undefined flag bit is set;
+- `UNSOLICITED` (`0x01`) is set on an operation other than `MESSAGE` or
+  `BULLETIN_HEADER`;
 - the actual payload size differs from `payload_length`;
 - the complete frame is truncated or contains bytes beyond the declared payload.
 
@@ -257,7 +259,11 @@ Private messages have no title, subject, conversation identifier or thread ident
 
 Receiving a `MESSAGE` does not mean that the user has read it. Read receipts and synchronized read state are outside version 0.1.
 
-The same frame may be sent proactively while transport policy considers the user active. Proactive delivery does not change sequence or synchronization semantics.
+The same frame may be sent proactively while transport policy considers the
+user active. A proactive frame sets the common-header `UNSOLICITED` flag
+(`0x01`); a `MESSAGE` returned by `GET_NEW_MESSAGES` leaves flags at `0x00`.
+This distinction is required because proactive delivery may be interleaved with
+a retrieval response. It does not change sequence or synchronization semantics.
 
 ---
 
@@ -307,7 +313,9 @@ Validation requirements:
 
 The title is mandatory because an identifier alone is not useful to the user.
 
-The same frame may be sent proactively while transport policy considers the user active.
+The same frame may be sent proactively while transport policy considers the
+user active. A proactive frame sets the common-header `UNSOLICITED` flag
+(`0x01`); a header returned by `GET_NEW_BULLETINS` leaves flags at `0x00`.
 
 ---
 
