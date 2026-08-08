@@ -2,11 +2,11 @@
 
 > A modern, transport-independent messaging platform for amateur radio.
 
-OpenQSP is an open-source communication platform designed for amateur radio operators. It provides persistent messaging over multiple transports while exposing a single, modern application protocol.
+OpenQSP is an open-source communication platform designed for amateur radio operators. It provides persistent messaging over multiple transports while exposing a single application protocol and a shared mailbox identity based on the user's callsign.
 
-Unlike traditional APRS messaging, OpenQSP is **not tied to any specific transport**. APRS is simply one of the supported communication media.
+OpenQSP is **not tied to any specific transport**. APRS is one transport adapter among several possible communication media.
 
-The same architecture is designed to operate over:
+The same architecture is intended to operate over:
 
 - Internet
 - APRS
@@ -16,7 +16,7 @@ The same architecture is designed to operate over:
 - VARA HF
 - Future transports
 
-The objective is to provide reliable, store-and-forward communications over slow and intermittent links without changing the user experience.
+The objective is to provide reliable, store-and-forward communications over slow, intermittent and heterogeneous links without changing the application semantics.
 
 ---
 
@@ -28,9 +28,9 @@ OpenQSP starts from the opposite assumption:
 
 > Internet may not exist, but radio still does.
 
-The project aims to offer a consistent messaging experience regardless of the transport being used.
+The project aims to offer one consistent messaging model regardless of the transport being used.
 
-Whether a user connects through APRS, Packet, LoRa or the Internet, they always interact with the same mailbox, the same conversations and the same identity.
+Whether a user connects through APRS, Packet, LoRa or the Internet, they interact with the same logical node state, the same callsign identity and the same stored objects.
 
 ---
 
@@ -40,68 +40,63 @@ Whether a user connects through APRS, Packet, LoRa or the Internet, they always 
 - Persistent store-and-forward messaging.
 - Optimized for extremely low-bandwidth links.
 - Designed for intermittent connectivity.
-- One identity (callsign) across every transport.
+- One identity per normalized amateur-radio callsign.
+- Deterministic synchronization using explicit cursors.
+- Clear separation between application protocol and transport adapters.
 - Open protocol.
 - Extensible architecture.
 - Open-source community project.
 
 ---
 
-# Features
+# OpenQSP Core v0.1
 
-## Persistent Messaging
+Version 0.1 deliberately keeps the application model small.
 
-Messages remain stored until the recipient receives them.
+## Private Messages
 
-Delivery does not depend on both users being online simultaneously.
+Persistent point-to-point messages between amateur-radio callsigns.
 
-## Low-Speed Chat
+Private messages:
 
-Conversations optimized for slow radio links.
+- have no subject/title;
+- are stored durably by the node;
+- can be retrieved incrementally;
+- are safe to retry without creating duplicates when the same object identifier is reused with identical content.
 
-Reliable delivery using acknowledgements and retries.
+## Public Bulletins
 
-## Internal Mail
+Public bulletin objects intended for information that should be discoverable and retrieved on demand.
 
-Permanent mailbox including:
+Bulletins include:
 
-- Inbox
-- Sent
-- Drafts
+- an identifier;
+- author callsign;
+- title;
+- body;
+- node-local synchronization sequence.
 
-## News & Bulletins
+Clients can retrieve bulletin headers incrementally and download complete bulletins by identifier.
 
-Topic-based channels that can be downloaded on demand.
+## Synchronization
 
-Examples:
+Clients synchronize through node-local monotonic cursors rather than depending on continuous connectivity.
 
-- General news
-- Weather
-- Amateur radio activity
-- Clubs
-- Events
-- Emergency bulletins
+The initial protocol supports:
 
-## Multiple Transports
+- `SEND_MESSAGE`;
+- `GET_NEW_MESSAGES`;
+- `GET_NEW_BULLETINS`;
+- `GET_BULLETIN`;
+- typed message, bulletin, acknowledgement, completion and error responses.
 
-The application protocol is independent from the underlying transport.
-
-Current and planned transports include:
-
-- Internet
-- APRS
-- AX.25 Packet
-- LoRa
-- VARA FM
-- VARA HF
-
-Future transports can be added without changing the application layer.
+Features such as conversations, groups, attachments, read receipts, synchronized read state and federation are intentionally outside the v0.1 core.
 
 ---
 
 # Architecture
 
-```
+```text
                      +----------------------+
                      |      OpenQSP         |
                      |    Application Core  |
@@ -114,81 +109,115 @@ Future transports can be added without changing the application layer.
       Internet     APRS      AX.25      LoRa      VARA
 ```
 
-Every transport implements the same application protocol.
+Transport adapters carry complete OpenQSP Core operations without redefining object semantics, persistence rules or synchronization behaviour.
 
-The server decides how messages are delivered according to transport availability and user preferences.
+The protocol codec is intentionally independent from sockets, APRS, WebSocket and database code so that the same Core frames can be reused across different transports.
 
 ---
 
 # Repository Structure
 
-```
+```text
 OpenQSP/
 │
-├── app/          Flutter client
-├── server/       OpenQSP server
-├── protocol/     Protocol specification
-├── design/       Architecture and design decisions
-├── docs/         Documentation
-├── examples/     Example implementations
-└── tools/        Development tools
+├── app/          Future user-facing client
+├── server/       Server and OpenQSP Core implementation
+├── protocol/     Protocol-related documentation
+├── design/       Architecture, protocol, storage and roadmap specifications
+├── examples/     Example implementations and fixtures
+└── tools/        Development and protocol laboratory tools
 ```
+
+The detailed implementation roadmap is maintained in [`design/05-roadmap.md`](design/05-roadmap.md).
 
 ---
 
 # Current Status
 
-🚧 **Early Design Phase**
+🚧 **Early Implementation Phase — OpenQSP Core v0.1**
 
-The project is currently focused on defining:
+The design baseline for version 0.1 is complete and implementation of the minimum viable node has started.
 
-- Overall architecture
-- Application protocol
-- Transport abstraction
-- APRS transport
-- REST/WebSocket API
-- Database design
+Currently implemented:
 
-No production implementation exists yet.
+- transport-independent protocol package and typed models;
+- OpenQSP Core frame encoder and decoder;
+- version 0.1 request and response payload codecs;
+- protocol validation and deterministic error handling;
+- automated protocol conformance tests against canonical binary examples;
+- `tools/frame_tool.py` for inspecting, validating and generating Core frames using the production codec.
+
+The next active milestone is the persistent object store.
+
+A complete server, real Internet transport, APRS transport adapter and end-user application do not exist yet.
 
 ---
 
 # Roadmap
 
-- [ ] Define system architecture
-- [ ] Define application protocol
-- [ ] Design APRS transport
-- [ ] Design REST/WebSocket API
-- [ ] Design database
-- [ ] Implement server
-- [ ] Implement Flutter client
-- [ ] Add Packet support
-- [ ] Add LoRa support
-- [ ] Add VARA support
+- [x] **Milestone 0 — Design baseline**
+- [x] **Milestone 1 — Protocol codec**
+- [ ] **Milestone 2 — Persistent object store**
+- [ ] **Milestone 3 — Minimum server core**
+- [ ] **Milestone 4 — Multi-user scenarios and end-to-end tests**
+- [ ] **Milestone 5 — Internet transport**
+- [ ] **Milestone 6 — APRS transport profile and simulator**
+- [ ] **Milestone 7 — User application**
+
+The first minimum server release is defined by completion of Milestones 1 through 4.
+
+Later extensions may include additional transports, richer user interaction models, attachments, cryptographic identity and node federation, but these are not part of the minimum v0.1 implementation.
+
+---
+
+# Development Tools
+
+OpenQSP includes maintained development and laboratory tools that reuse production protocol code.
+
+The first available tool is:
+
+```text
+tools/frame_tool.py
+```
+
+It can:
+
+- decode a hexadecimal OpenQSP Core frame into named fields;
+- validate frames and report protocol errors;
+- encode supported v0.1 operations from human-readable arguments;
+- produce canonical hexadecimal output suitable for comparison with the protocol specification and automated tests.
+
+Additional simulators and scenario tools will be added as storage, server-core and transport milestones are implemented.
 
 ---
 
 # Design Philosophy
 
-OpenQSP is **not** an APRS application.
+OpenQSP is **not an APRS application**.
 
-It is a transport-independent communication platform where APRS is one of several supported transports.
+It is a transport-independent communication platform where APRS is one possible transport adapter.
 
 Every design decision prioritizes:
 
-- Simplicity
-- Reliability
-- Low bandwidth usage
-- Extensibility
-- Long-term maintainability
+- simplicity;
+- deterministic behaviour;
+- reliability;
+- low bandwidth usage;
+- tolerance of intermittent links;
+- separation of protocol and transport concerns;
+- long-term maintainability.
+
+The minimum version is intentionally small. New concepts are added only when they are required by real use cases and can be specified without weakening the Core model.
 
 ---
 
 # Contributing
 
-OpenQSP is currently in its design stage.
+OpenQSP is in active early implementation.
 
-Ideas, discussions and contributions are welcome as the architecture evolves.
+Protocol behaviour and scope should follow the documents under `design/`, with [`design/05-roadmap.md`](design/05-roadmap.md) defining the current implementation sequence.
+
+Ideas, testing and contributions are welcome as the project evolves.
 
 ---
 
