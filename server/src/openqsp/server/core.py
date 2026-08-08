@@ -1,0 +1,179 @@
+"""OpenQSP Core request decoding, dispatch, and response encoding.
+
+Transport and authentication layers are responsible for supplying a verified
+callsign and one complete Core frame.  This module deliberately has no concept
+of connections or sessions.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from openqsp.protocol import (
+    Ack,
+    Bulletin,
+    BulletinHeader,
+    End,
+    Error,
+    ErrorCode,
+    GetBulletin,
+    GetNewBulletins,
+    GetNewMessages,
+    Message,
+    Operation,
+    ProtocolObject,
+    SendMessage,
+    decode_frame,
+    encode_frame,
+)
+from openqsp.protocol.errors import (
+    InvalidFieldError,
+    PayloadLengthError,
+    ProtocolDecodeError,
+    UnknownOperationError,
+    UnsupportedVersionError,
+)
+from openqsp.storage import BulletinStore, MessageStore
+
+
+@dataclass(frozen=True)
+class RequestContext:
+    """Trusted information supplied outside the client-controlled frame."""
+
+    authenticated_callsign: str
+
+
+class ServerCore:
+    """Decode and dispatch complete Core frames without transport concerns.
+
+    Stores are injected once so later milestone handlers can use them without
+    creating global state or opening a database as part of dispatch.  M3.1
+    intentionally does not call either store.
+    """
+
+    def __init__(
+        self,
+        *,
+        message_store: MessageStore | None = None,
+        bulletin_store: BulletinStore | None = None,
+    ) -> None:
+        self._message_store = message_store
+        self._bulletin_store = bulletin_store
+
+    def handle_frame(
+        self, authenticated_callsign: str, frame_bytes: bytes
+    ) -> list[bytes]:
+        """Handle one request frame and return zero or more response frames.
+
+        A frame shorter than the common header is silently discarded because
+        it contains too little information to construct a meaningful protocol
+        response.  Other codec failures are converted to one protocol ERROR.
+        """
+
+        if not isinstance(authenticated_callsign, str):
+            raise TypeError("authenticated_callsign must be a string")
+
+        try:
+            request = decode_frame(frame_bytes)
+        except (ProtocolDecodeError, InvalidFieldError) as error:
+            response = self._decode_error_response(frame_bytes, error)
+            return [] if response is None else [encode_frame(response)]
+
+        context = RequestContext(authenticated_callsign)
+        responses = self._dispatch(context, request)
+        return [encode_frame(response) for response in responses]
+
+    def _dispatch(
+        self, context: RequestContext, request: ProtocolObject
+    ) -> list[ProtocolObject]:
+        # Keep each request operation visible here: later milestones can fill
+        # in one handler without changing request classification.
+        if isinstance(request, SendMessage):
+            return self._handle_send_message(context, request)
+        if isinstance(request, GetNewMessages):
+            return self._handle_get_new_messages(context, request)
+        if isinstance(request, GetNewBulletins):
+            return self._handle_get_new_bulletins(context, request)
+        if isinstance(request, GetBulletin):
+            return self._handle_get_bulletin(context, request)
+
+        return [
+            Error(
+                self._operation_for(request),
+                ErrorCode.UNKNOWN_OPERATION,
+                "operation is not a client request",
+            )
+        ]
+
+    def _handle_send_message(
+        self, context: RequestContext, request: SendMessage
+    ) -> list[ProtocolObject]:
+        return [self._not_implemented(Operation.SEND_MESSAGE)]
+
+    def _handle_get_new_messages(
+        self, context: RequestContext, request: GetNewMessages
+    ) -> list[ProtocolObject]:
+        return [self._not_implemented(Operation.GET_NEW_MESSAGES)]
+
+    def _handle_get_new_bulletins(
+        self, context: RequestContext, request: GetNewBulletins
+    ) -> list[ProtocolObject]:
+        return [self._not_implemented(Operation.GET_NEW_BULLETINS)]
+
+    def _handle_get_bulletin(
+        self, context: RequestContext, request: GetBulletin
+    ) -> list[ProtocolObject]:
+        return [self._not_implemented(Operation.GET_BULLETIN)]
+
+    @staticmethod
+    def _not_implemented(operation: Operation) -> Error:
+        # BUSY is the existing retryable failure code; the wire protocol has
+        # no NOT_IMPLEMENTED code and M3.1 must not invent one.
+        return Error(operation, ErrorCode.BUSY, "operation not implemented")
+
+    @staticmethod
+    def _operation_for(value: ProtocolObject) -> Operation:
+        if isinstance(value, Message):
+            return Operation.MESSAGE
+        if isinstance(value, BulletinHeader):
+            return Operation.BULLETIN_HEADER
+        if isinstance(value, Bulletin):
+            return Operation.BULLETIN
+        if isinstance(value, End):
+            return Operation.END
+        if isinstance(value, Ack):
+            return Operation.ACK
+        if isinstance(value, Error):
+            return Operation.ERROR
+        raise TypeError(f"unclassified protocol object: {type(value).__name__}")
+
+    @staticmethod
+    def _decode_error_response(
+        frame: object, error: ProtocolDecodeError | InvalidFieldError
+    ) -> Error | None:
+        if not isinstance(frame, bytes) or len(frame) < 4:
+            return None
+
+        operation: Operation | int = 0
+        if frame[0] == 1:
+            try:
+                operation = Operation(frame[1])
+            except ValueError:
+                pass
+
+        if isinstance(error, UnsupportedVersionError):
+            code = ErrorCode.UNSUPPORTED_VERSION
+            operation = 0
+        elif isinstance(error, UnknownOperationError):
+            code = ErrorCode.UNKNOWN_OPERATION
+            operation = 0
+        elif isinstance(error, InvalidFieldError) and frame[2] != 0:
+            code = ErrorCode.INVALID_FRAME
+        elif isinstance(error, InvalidFieldError):
+            code = ErrorCode.INVALID_FIELD
+        elif isinstance(error, PayloadLengthError):
+            code = ErrorCode.INVALID_FRAME
+        else:
+            code = ErrorCode.INVALID_FRAME
+
+        return Error(operation, code, str(error)[:64])
