@@ -12,8 +12,8 @@ Development and laboratory tools evolve alongside the implementation. They are p
 
 ## 1. Current project phase
 
-OpenQSP has completed the version 0.1 minimum local node core and is moving to
-its first real transport.
+OpenQSP has completed the version 0.1 minimum local node core and its first
+development Internet transport.
 
 The following design foundations are complete for version 0.1:
 
@@ -38,7 +38,7 @@ Relevant documents:
 - `08-node-storage.md`;
 - `09-protocol-examples.md`.
 
-The next active milestone is **Milestone 5 - Internet transport**.
+**Milestone 5 - Internet transport is complete.**
 
 ---
 
@@ -230,7 +230,15 @@ The reference client and scenarios are development tools, not the final user app
 
 ## 7. Milestone 5 - Internet transport
 
-**Status: M5.4 implemented (TCP client and remote scenario integration)**
+**Status: complete**
+
+The milestone was delivered as:
+
+- **M5.1 - Minimal Internet TCP Transport**;
+- **M5.2 - Client Transport Abstraction**;
+- **M5.3 - Transport-Neutral Scenario Harness**;
+- **M5.4 - TCP Client and Remote Scenario Integration**;
+- **M5.5 - Internet Transport Conformance and Closure**.
 
 Objective: expose the minimum node through one simple Internet transport.
 
@@ -405,6 +413,7 @@ A real APRS adapter, graphical application and production authentication are not
 
 The completed release includes the protocol codec, persistent store, minimum
 server core, multi-user end-to-end workflows, retry idempotency,
-synchronization, restart persistence, and bulletin retrieval. It intentionally
-has no real Internet transport, APRS transport, production-grade
-authentication, or final user application; those belong to later milestones.
+synchronization, restart persistence, bulletin retrieval, and the development
+TCP Internet transport. It intentionally has no APRS transport,
+production-grade authentication, or final user application; those belong to
+later milestones.
