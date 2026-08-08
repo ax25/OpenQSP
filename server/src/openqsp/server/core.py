@@ -265,18 +265,126 @@ class ServerCore:
     def _handle_get_new_bulletins(
         self, context: RequestContext, request: GetNewBulletins
     ) -> list[ProtocolObject]:
-        return [self._not_implemented(Operation.GET_NEW_BULLETINS)]
+        if self._bulletin_store is None:
+            return [
+                Error(
+                    Operation.GET_NEW_BULLETINS,
+                    ErrorCode.BUSY,
+                    "bulletin store unavailable",
+                )
+            ]
+
+        try:
+            validate_callsign(
+                context.authenticated_callsign, "authenticated_callsign"
+            )
+        except InvalidFieldError:
+            return [
+                Error(
+                    Operation.GET_NEW_BULLETINS,
+                    ErrorCode.UNAUTHORIZED,
+                    "invalid authenticated callsign",
+                )
+            ]
+
+        try:
+            page = self._bulletin_store.get_new_bulletins(
+                since=request.since,
+                limit=request.max,
+            )
+        except InvalidCursorError:
+            return [
+                Error(
+                    Operation.GET_NEW_BULLETINS,
+                    ErrorCode.INVALID_CURSOR,
+                    "invalid bulletin cursor",
+                )
+            ]
+        except StorageIntegrityError:
+            return [
+                Error(
+                    Operation.GET_NEW_BULLETINS,
+                    ErrorCode.INTERNAL_ERROR,
+                    "bulletin storage integrity failure",
+                )
+            ]
+
+        responses: list[ProtocolObject] = [
+            BulletinHeader(
+                header.sequence,
+                header.bulletin_id,
+                header.created_at,
+                header.author,
+                header.title,
+            )
+            for header in page.headers
+        ]
+        responses.append(
+            End(
+                Operation.GET_NEW_BULLETINS,
+                len(page.headers),
+                page.next_since,
+                page.has_more,
+            )
+        )
+        return responses
 
     def _handle_get_bulletin(
         self, context: RequestContext, request: GetBulletin
     ) -> list[ProtocolObject]:
-        return [self._not_implemented(Operation.GET_BULLETIN)]
+        if self._bulletin_store is None:
+            return [
+                Error(
+                    Operation.GET_BULLETIN,
+                    ErrorCode.BUSY,
+                    "bulletin store unavailable",
+                )
+            ]
 
-    @staticmethod
-    def _not_implemented(operation: Operation) -> Error:
-        # BUSY is the existing retryable failure code; the wire protocol has
-        # no NOT_IMPLEMENTED code and M3.1 must not invent one.
-        return Error(operation, ErrorCode.BUSY, "operation not implemented")
+        try:
+            validate_callsign(
+                context.authenticated_callsign, "authenticated_callsign"
+            )
+        except InvalidFieldError:
+            return [
+                Error(
+                    Operation.GET_BULLETIN,
+                    ErrorCode.UNAUTHORIZED,
+                    "invalid authenticated callsign",
+                )
+            ]
+
+        try:
+            bulletin = self._bulletin_store.get_bulletin(
+                bulletin_id=request.bulletin_id
+            )
+        except StorageIntegrityError:
+            return [
+                Error(
+                    Operation.GET_BULLETIN,
+                    ErrorCode.INTERNAL_ERROR,
+                    "bulletin storage integrity failure",
+                )
+            ]
+
+        if bulletin is None:
+            return [
+                Error(
+                    Operation.GET_BULLETIN,
+                    ErrorCode.NOT_FOUND,
+                    "bulletin not found",
+                )
+            ]
+
+        return [
+            Bulletin(
+                bulletin.bulletin_id,
+                bulletin.created_at,
+                bulletin.author,
+                bulletin.title,
+                bulletin.body,
+            )
+        ]
 
     @staticmethod
     def _operation_for(value: ProtocolObject) -> Operation:

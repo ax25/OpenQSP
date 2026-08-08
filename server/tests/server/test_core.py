@@ -21,7 +21,7 @@ from openqsp.protocol import (
 from openqsp.server import RequestContext, ServerCore
 
 
-DEFERRED_REQUESTS = (
+REQUESTS_WITHOUT_STORES = (
     (GetNewBulletins(0, 5), Operation.GET_NEW_BULLETINS),
     (GetBulletin(1), Operation.GET_BULLETIN),
 )
@@ -29,9 +29,9 @@ DEFERRED_REQUESTS = (
 
 @pytest.mark.parametrize(
     ("protocol_request", "operation"),
-    DEFERRED_REQUESTS,
+    REQUESTS_WITHOUT_STORES,
 )
-def test_each_client_request_has_an_explicit_deferred_dispatch(
+def test_bulletin_requests_without_store_return_busy(
     protocol_request, operation
 ):
     responses = ServerCore().handle_frame("K1ABC", encode_frame(protocol_request))
@@ -39,7 +39,7 @@ def test_each_client_request_has_an_explicit_deferred_dispatch(
     assert len(responses) == 1
     assert isinstance(responses[0], bytes)
     assert decode_frame(responses[0]) == Error(
-        operation, ErrorCode.BUSY, "operation not implemented"
+        operation, ErrorCode.BUSY, "bulletin store unavailable"
     )
 
 
