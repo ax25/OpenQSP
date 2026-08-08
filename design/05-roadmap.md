@@ -12,8 +12,7 @@ Development and laboratory tools evolve alongside the implementation. They are p
 
 ## 1. Current project phase
 
-OpenQSP has completed the version 0.1 minimum local node core and its first
-development Internet transport.
+OpenQSP has completed the version 0.1 minimum local node core and its first development Internet transport.
 
 The following design foundations are complete for version 0.1:
 
@@ -39,6 +38,8 @@ Relevant documents:
 - `09-protocol-examples.md`.
 
 **Milestone 5 - Internet transport is complete.**
+
+Before implementing the APRS transport, the next server-side work should close the remaining production gaps that affect every transport: authentication, authenticated session lifecycle, server-initiated delivery/presence, and capability discovery. These concerns must remain transport-independent so TCP, APRS and future adapters share the same application behaviour.
 
 ---
 
@@ -110,9 +111,7 @@ Initial implementation target:
 - separate sequence space per recipient mailbox and one node-local bulletin sequence space;
 - indexes for mailbox and bulletin retrieval.
 
-Development scenarios should exercise storage behaviour directly, including per-mailbox
-allocation, cursor progression, concurrency and restart persistence. Duplicate suppression and
-retry transactions for unreliable links belong to transport-specific scenarios.
+Development scenarios should exercise storage behaviour directly, including per-mailbox allocation, cursor progression, concurrency and restart persistence. Duplicate suppression and retry transactions for unreliable links belong to transport-specific scenarios.
 
 Acceptance criteria:
 
@@ -173,58 +172,31 @@ Completion of this milestone defines the first functioning OpenQSP node core.
 
 **Status: complete**
 
-M4.1 provides the first required scenario: two authenticated test users
-exchange one private message through the production codec, server core, and
-persistent store, with automated checks for mailbox isolation. M4.2 adds the
-identical-message retry after a lost application acknowledgement under the
-then-current design. That Core-level retry behaviour and M4.3's old identifier-collision scenario
-are superseded by the target architecture: unreliable transports own transaction replay and
-duplicate suppression, while Core assigns mailbox sequences. M4.4 implements
-incremental mailbox synchronization with response-derived cursors, mailbox
-isolation, suppression of previously delivered messages, and a final empty
-synchronization. M4.5 adds an isolated empty-mailbox synchronization scenario
-covering both `since=0` and a completed cursor, including cursor stability in
-the presence of unrelated mailbox activity.
-M4.6 adds mailbox pagination with a page size of two, response-derived
-`END.next_since` cursors and explicit `has_more` transitions. Activity is interleaved across
-independent recipient mailboxes while checks preserve mailbox isolation, per-mailbox monotonic
-ordering, correct cursor progression, pagination, and no loss.
-M4.7 implements node-restart recovery by reconstructing the complete local
-node over the same SQLite file. It verifies durable private messages and
-sequence allocation, continued use of a pre-restart `END.next_since` cursor,
-duplicate-free incremental synchronization, and unchanged mailbox isolation
-through the production client, codec, and server stack. M4.8 adds
-development-seeded public bulletin header synchronization, response-derived
-cursors, complete bulletin retrieval by synchronized sequence, incremental
-and empty follow-ups, and missing-bulletin handling. M4.9 closes the milestone
-with one integrated conformance workflow across authenticated messaging,
-isolation, restart persistence, cursor resumption, sequence
-continuity, bulletin synchronization and full retrieval through the production
-codec, `ServerCore`, and persistent stores. Detailed behaviour remains covered
-by the individual M4.1-M4.8 scenarios.
+M4.1 provides the first required scenario: two authenticated test users exchange one private message through the production codec, server core, and persistent store, with automated checks for mailbox isolation. M4.2 and M4.3 originally exercised Core-level retry/idempotency and global identifier collision behaviour under the superseded object-identity design. Those semantics no longer belong to Core: unreliable transports own transaction replay and duplicate suppression, while Core assigns recipient-mailbox sequences. M4.4 implements incremental mailbox synchronization with response-derived cursors, mailbox isolation, suppression of previously delivered messages, and a final empty synchronization. M4.5 adds an isolated empty-mailbox synchronization scenario covering both `since=0` and a completed cursor, including cursor stability in the presence of unrelated mailbox activity.
+M4.6 adds mailbox pagination with a page size of two, response-derived `END.next_since` cursors and explicit `has_more` transitions. Activity is interleaved across independent recipient mailboxes while checks preserve mailbox isolation, per-mailbox monotonic ordering, correct cursor progression, pagination, and no loss.
+M4.7 implements node-restart recovery by reconstructing the complete local node over the same SQLite file. It verifies durable private messages and sequence allocation, continued use of a pre-restart `END.next_since` cursor, duplicate-free incremental synchronization, and unchanged mailbox isolation through the production client, codec, and server stack. M4.8 adds development-seeded public bulletin header synchronization, response-derived cursors, complete bulletin retrieval by synchronized sequence, incremental and empty follow-ups, and missing-bulletin handling. M4.9 closes the milestone with one integrated conformance workflow across authenticated messaging, isolation, restart persistence, cursor resumption, sequence continuity, bulletin synchronization and full retrieval through the production codec, `ServerCore`, and persistent stores. Detailed behaviour remains covered by the maintained scenarios that still match the current architecture.
 
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
 Required scenarios include at least:
 
 - two users exchanging a private message;
-- unreliable-transport retry after a lost transport acknowledgement;
-- peer-scoped duplicate suppression and replay of a prior Core result;
 - incremental mailbox synchronization;
 - empty mailbox synchronization;
 - pagination and `has_more`;
 - node restart with persistent state;
-- bulletin header synchronization and complete bulletin retrieval.
+- bulletin header synchronization and complete bulletin retrieval;
+- transport-specific retry and duplicate-suppression scenarios once an unreliable transport is implemented.
 
 Acceptance criteria:
 
 - two test users can exchange private messages through one node;
-- an unreliable transport can safely retry after losing its transport acknowledgement;
 - the recipient can synchronize messages incrementally;
 - bulletin headers and complete bulletins can be retrieved;
 - synchronization resumes correctly after client and node restarts;
 - scenarios are repeatable and do not depend on manual database editing;
-- the complete workflow is exercised by automated end-to-end tests.
+- the complete workflow is exercised by automated end-to-end tests;
+- unreliable transports can add retry and duplicate suppression without changing Core object identity or storage semantics.
 
 The reference client and scenarios are development tools, not the final user application.
 
@@ -244,14 +216,7 @@ The milestone was delivered as:
 
 Objective: expose the minimum node through one simple Internet transport.
 
-TCP is the first development Internet transport. Each connection begins with a
-bounded `CALLSIGN <normalized-callsign>\n` handshake. This identification is
-**development-only and is not production authentication**. After the handshake,
-the TCP adapter uses the existing Core header payload-length byte to recover
-complete frames; the OpenQSP Core frames themselves are unchanged. It forwards
-each complete request and the connection callsign directly to `ServerCore` and
-writes the returned frames in order, without inspecting operations or owning
-protocol or storage logic.
+TCP is the first development Internet transport. Each connection begins with a bounded `CALLSIGN <normalized-callsign>\n` handshake. This identification is **development-only and is not production authentication**. After the handshake, the TCP adapter uses the existing Core header payload-length byte to recover complete frames; the OpenQSP Core frames themselves are unchanged. It forwards each complete request and the connection callsign directly to `ServerCore` and writes the returned frames in order, without inspecting operations or owning protocol or storage logic.
 
 The transport provides the core with:
 
@@ -259,19 +224,9 @@ The transport provides the core with:
 - one authenticated or development-authenticated callsign;
 - a way to return one or more response frames.
 
-The TCP server transport is complemented by `TcpTransport` in
-`client_sim.py`. The simulator has explicit local SQLite and remote TCP modes,
-and the same transport-neutral scenarios execute either directly against Core
-or over loopback TCP. The client uses one connection per exchange and the
-development callsign handshake remains identification only, **not production
-authentication**.
+The TCP server transport is complemented by `TcpTransport` in `client_sim.py`. The simulator has explicit local SQLite and remote TCP modes, and the same transport-neutral scenarios execute either directly against Core or over loopback TCP. The client uses one connection per exchange and the development callsign handshake remains identification only, **not production authentication**.
 
-Remote integration environments own the real TCP listener and test database.
-Their controlled store access supports development-only bulletin seeding, and
-their restart operation stops and reconstructs the complete TCP-visible node
-against the same SQLite file. Reconnection therefore preserves durable
-messages, sequence continuity, and synchronization cursors without treating a
-socket as OpenQSP identity.
+Remote integration environments own the real TCP listener and test database. Their controlled store access supports development-only bulletin seeding, and their restart operation stops and reconstructs the complete TCP-visible node against the same SQLite file. Reconnection therefore preserves durable messages, sequence continuity, and synchronization cursors without treating a socket as OpenQSP identity.
 
 Acceptance criteria:
 
@@ -281,15 +236,44 @@ Acceptance criteria:
 - transport code does not duplicate protocol or domain rules;
 - the same core scenarios can be executed through the Internet transport.
 
-Production-grade authentication may remain a later milestone, but development authentication must be visibly marked as non-production.
+Production-grade authentication remains a later milestone, and development authentication must remain visibly marked as non-production.
 
 ---
 
-## 8. Milestone 6 - APRS transport profile and simulator
+## 8. Milestone 6 - Production identity, sessions and node capabilities
 
-**Status: deferred**
+**Status: next**
 
-Objective: define, simulate and implement OpenQSP carriage over APRS after the node core is stable.
+Objective: replace development-only callsign identification with a production-capable identity/session boundary and define how a client discovers what a node can do before APRS transport work begins.
+
+Required design and implementation work:
+
+- callsign + password account authentication for normal Internet access;
+- a documented offline-client policy so the user application can still open and operate with locally cached state when Internet authentication is unavailable;
+- authenticated session lifecycle independent from any particular transport;
+- explicit separation between OpenQSP user identity and TCP/APRS connection state;
+- server-initiated delivery for connected/active clients without allowing unsolicited frames to satisfy normal request/response exchanges;
+- ACTIVE/INACTIVE or equivalent presence semantics needed by proactive delivery;
+- capability/service discovery so clients can query which node features or commands are currently available;
+- deterministic authorization and error handling for unsupported or unauthorized operations.
+
+Acceptance criteria:
+
+- production TCP access no longer relies on the development-only `CALLSIGN` handshake as authentication;
+- authenticated callsign identity is supplied to Core through a transport-independent session boundary;
+- reconnecting or changing transport does not create a new OpenQSP identity;
+- an active client can receive server-initiated events without corrupting normal request correlation;
+- clients can query node capabilities and adapt their UI/available actions accordingly;
+- authentication/session/capability tests are repeatable locally and over the development TCP transport;
+- no APRS-specific retry, fragmentation or acknowledgement semantics leak into the application/session layer.
+
+---
+
+## 9. Milestone 7 - APRS transport profile and simulator
+
+**Status: planned**
+
+Objective: define, simulate and implement OpenQSP carriage over APRS after the node core and shared session semantics are stable.
 
 Required design work before implementation:
 
@@ -298,7 +282,7 @@ Required design work before implementation:
 - message correlation;
 - APRS acknowledgement interaction;
 - retry timing and limits;
-- duplicate suppression;
+- peer-scoped duplicate suppression and replay of prior Core results where required;
 - channel rate control;
 - proactive delivery while the user is locally active.
 
@@ -316,6 +300,7 @@ Acceptance criteria include:
 
 - canonical OpenQSP frames survive APRS encode, fragmentation, reassembly and decode unchanged;
 - documented fault scenarios behave predictably;
+- retries and duplicate suppression are scoped to the APRS transport and do not create Core object IDs;
 - successful exchange is demonstrated locally through the simulator;
 - successful exchange is then demonstrated over APRS-IS before testing over RF.
 
@@ -323,18 +308,20 @@ APRS must remain a transport adapter and must not redefine OpenQSP object or pro
 
 ---
 
-## 9. Milestone 7 - User application
+## 10. Milestone 8 - User application
 
-**Status: deferred**
+**Status: planned**
 
-Objective: implement the first user-facing client after the server and at least one transport are usable.
+Objective: implement the first user-facing client after the server and at least one production-capable identity/session path are usable.
 
 Expected minimum features:
 
-- callsign identity configuration;
+- callsign identity configuration and account sign-in;
+- local/offline startup using cached local state when the network is unavailable;
 - private-message inbox and sending;
 - bulletin-header list;
 - bulletin download;
+- node capability discovery and UI adaptation;
 - local persistence;
 - independent message and bulletin synchronization cursors;
 - clear delivery and error states.
@@ -343,20 +330,20 @@ The application platform and framework do not affect the Core protocol.
 
 ---
 
-## 10. Test and laboratory layers
+## 11. Test and laboratory layers
 
 OpenQSP development uses four complementary levels:
 
 1. **Unit tests** - verify codec, storage and server functions in isolation.
 2. **Protocol vectors** - verify exact binary compatibility with `09-protocol-examples.md`.
-3. **Laboratory and scenario tools** - emulate users, workflows and later unreliable transports.
+3. **Laboratory and scenario tools** - emulate users, workflows and unreliable transports.
 4. **Real transports** - verify the same behaviour over Internet, APRS-IS and eventually RF.
 
 Laboratory tools must reuse production protocol code wherever possible. They must not become an alternative implementation of OpenQSP semantics.
 
 ---
 
-## 11. Later extensions
+## 12. Later extensions
 
 The following are intentionally outside the minimum version and require separate design decisions:
 
@@ -375,34 +362,33 @@ These features must not be added to the version 0.1 core merely because the data
 
 ---
 
-## 12. Immediate implementation order
+## 13. Current implementation order
 
-The next development work should proceed in this order:
+Milestones 0 through 5 are complete. The next work should proceed in this order:
 
-1. protocol package, codec and automated tests;
-2. `frame_tool.py` using the production codec;
-3. SQLite schema and storage implementation plus storage scenarios;
-4. minimum server-core request handler;
-5. `client_sim.py` and multi-user scenarios;
-6. automated local end-to-end tests;
-7. first Internet transport and remote simulator mode;
-8. APRS transport profile, `aprs_sim.py`, APRS-IS and finally RF.
+1. define and implement production identity/authentication semantics;
+2. introduce the transport-independent authenticated session lifecycle;
+3. implement server-initiated delivery and ACTIVE/INACTIVE behaviour;
+4. define and implement node capability/service discovery;
+5. close Milestone 6 with integrated TCP/session/capability conformance tests;
+6. define the APRS transport profile and implement `aprs_sim.py`;
+7. validate APRS locally with loss/duplicate/reordering fault injection;
+8. validate over APRS-IS and finally RF;
+9. begin the first user-facing application on top of the stable identity, capability and synchronization model.
 
 Work may overlap where dependencies permit, but a milestone must satisfy its acceptance criteria before it is considered complete.
 
 ---
 
-## 13. Minimum server release definition
+## 14. Minimum server release definition
 
-The first minimum server release is complete when Milestones 1 through 4 are
-complete. **That condition is now satisfied:** Milestones 1 through 4 are
-complete, delivering the minimum local server/core release.
+The first minimum server release is complete when Milestones 1 through 4 are complete. **That condition is now satisfied:** Milestones 1 through 4 are complete, delivering the minimum local server/core release.
 
 It must demonstrate that:
 
 - a node can start with an empty persistent database;
 - one authenticated user can submit a private message;
-- the node stores it durably and handles retries idempotently;
+- the node stores it durably and assigns it a recipient-mailbox sequence;
 - the intended recipient can retrieve it incrementally;
 - other users cannot retrieve it;
 - bulletin headers and bodies can be retrieved;
@@ -411,11 +397,8 @@ It must demonstrate that:
 - the same behaviour can be reproduced through maintained development tools and automated scenarios;
 - all required behaviour is covered by automated tests.
 
+Transport-specific retry and duplicate suppression are deliberately outside this Core release definition and must be implemented by transports that require them.
+
 A real APRS adapter, graphical application and production authentication are not required for this first release.
 
-The completed release includes the protocol codec, persistent store, minimum
-server core, multi-user end-to-end workflows, synchronization reliability,
-synchronization, restart persistence, bulletin retrieval, and the development
-TCP Internet transport. It intentionally has no APRS transport,
-production-grade authentication, or final user application; those belong to
-later milestones.
+The completed release includes the protocol codec, persistent store, minimum server core, multi-user end-to-end workflows, synchronization, restart persistence, bulletin retrieval, and the development TCP Internet transport. It intentionally has no APRS transport, production-grade authentication, or final user application; those belong to later milestones.
