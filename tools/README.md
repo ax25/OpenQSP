@@ -212,6 +212,21 @@ python tools/scenarios/empty_mailbox_sync.py /tmp/openqsp-m4.5.db
 Use a new database path (or remove the previous laboratory database) before
 repeating this deterministic scenario.
 
+The M4.6 scenario stores five messages for `EA3BBB`, with two messages for
+other mailboxes interleaved in the global sequence. With a page size of two,
+it follows only each response's completed `END.next_since` through two full
+pages (`has_more=true`), one partial final page (`has_more=false`), and a
+stable empty follow-up:
+
+```bash
+python tools/scenarios/mailbox_pagination.py /tmp/openqsp-m4.6.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this deterministic scenario. Its output labels `Page 1`, `Page 2`,
+`Final page`, and `Empty follow-up`, and shows every `MESSAGE` sequence plus
+the terminating `END` count, cursor, and `has_more` value.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
