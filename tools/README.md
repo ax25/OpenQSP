@@ -160,6 +160,19 @@ python tools/scenarios/multi_user_private_message.py /tmp/openqsp-m4.1.db
 Use a new database path (or remove the previous laboratory database) before
 repeating this single-send scenario.
 
+The M4.2 scenario processes a message normally, intentionally ignores the
+first `STORED` acknowledgement, and submits the exact same `SendMessage`
+again. It then synchronizes the recipient mailbox twice to demonstrate that
+the retry returns `ALREADY_STORED`, creates no duplicate, and consumes no new
+sequence:
+
+```bash
+python tools/scenarios/message_retry_after_lost_ack.py /tmp/openqsp-m4.2.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this scenario.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
@@ -233,6 +246,7 @@ are available:
 tools/frame_tool.py
 tools/client_sim.py
 tools/scenarios/multi_user_private_message.py
+tools/scenarios/message_retry_after_lost_ack.py
 ```
 
 They use the production protocol codec directly; the client simulator also
