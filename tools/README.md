@@ -238,8 +238,18 @@ isolation:
 python tools/scenarios/node_restart_persistence.py /tmp/openqsp-m4.7.db
 ```
 
+The M4.8 scenario uses the development-only bulletin seeding path, then
+synchronizes public bulletin headers and derives its bulletin cursor from the
+terminating response. It retrieves a complete bulletin by the identifier in a
+synchronized header, demonstrates incremental and empty synchronization, and
+verifies `NOT_FOUND` for a missing bulletin:
+
+```bash
+python tools/scenarios/bulletin_sync_retrieval.py /tmp/openqsp-m4.8.db
+```
+
 Use a new database path (or remove the previous laboratory database) before
-repeating this deterministic scenario.
+repeating either persistent scenario.
 
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 

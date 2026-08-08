@@ -12,7 +12,8 @@ Development and laboratory tools evolve alongside the implementation. They are p
 
 ## 1. Current project phase
 
-OpenQSP is transitioning from protocol design to implementation of the minimum viable node.
+OpenQSP has completed the version 0.1 minimum local node core and is moving to
+its first real transport.
 
 The following design foundations are complete for version 0.1:
 
@@ -37,7 +38,7 @@ Relevant documents:
 - `08-node-storage.md`;
 - `09-protocol-examples.md`.
 
-The next active milestone is Milestone 4 - Multi-user scenarios and end-to-end test.
+The next active milestone is **Milestone 5 - Internet transport**.
 
 ---
 
@@ -169,7 +170,7 @@ Completion of this milestone defines the first functioning OpenQSP node core.
 
 ## 6. Milestone 4 - Multi-user scenarios and end-to-end test
 
-**Status: planned**
+**Status: complete**
 
 M4.1 provides the first required scenario: two authenticated test users
 exchange one private message through the production codec, server core, and
@@ -177,8 +178,7 @@ persistent store, with automated checks for mailbox isolation. M4.2 adds the
 identical-message retry after a lost application acknowledgement and verifies
 that it creates neither a duplicate nor a sequence gap. M4.3 demonstrates that
 reusing a stored message identifier with a changed body returns `CONFLICT`,
-leaves the original intact, and consumes no sequence. The remaining Milestone
-4 scenarios and acceptance criteria are still planned. M4.4 implements
+leaves the original intact, and consumes no sequence. M4.4 implements
 incremental mailbox synchronization with response-derived cursors, mailbox
 isolation, suppression of previously delivered messages, and a final empty
 synchronization. M4.5 adds an isolated empty-mailbox synchronization scenario
@@ -191,8 +191,15 @@ M4.7 implements node-restart recovery by reconstructing the complete local
 node over the same SQLite file. It verifies durable private messages and
 sequence allocation, continued use of a pre-restart `END.next_since` cursor,
 duplicate-free incremental synchronization, and unchanged mailbox isolation
-through the production client, codec, and server stack. Milestone 4 remains
-open pending bulletin synchronization and complete bulletin retrieval.
+through the production client, codec, and server stack. M4.8 adds
+development-seeded public bulletin header synchronization, response-derived
+cursors, complete bulletin retrieval by synchronized identifier, incremental
+and empty follow-ups, and missing-bulletin handling. M4.9 closes the milestone
+with one integrated conformance workflow across authenticated messaging,
+isolation, retry idempotency, restart persistence, cursor resumption, sequence
+continuity, bulletin synchronization and full retrieval through the production
+codec, `ServerCore`, and persistent stores. Detailed behaviour remains covered
+by the individual M4.1-M4.8 scenarios.
 
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
@@ -223,7 +230,7 @@ The reference client and scenarios are development tools, not the final user app
 
 ## 7. Milestone 5 - Internet transport
 
-**Status: deferred until the server core is complete**
+**Status: next active milestone**
 
 Objective: expose the minimum node through one simple Internet transport.
 
@@ -356,7 +363,9 @@ Work may overlap where dependencies permit, but a milestone must satisfy its acc
 
 ## 13. Minimum server release definition
 
-The first minimum server release is complete when Milestones 1 through 4 are complete.
+The first minimum server release is complete when Milestones 1 through 4 are
+complete. **That condition is now satisfied:** Milestones 1 through 4 are
+complete, delivering the minimum local server/core release.
 
 It must demonstrate that:
 
@@ -372,3 +381,9 @@ It must demonstrate that:
 - all required behaviour is covered by automated tests.
 
 A real APRS adapter, graphical application and production authentication are not required for this first release.
+
+The completed release includes the protocol codec, persistent store, minimum
+server core, multi-user end-to-end workflows, retry idempotency,
+synchronization, restart persistence, and bulletin retrieval. It intentionally
+has no real Internet transport, APRS transport, production-grade
+authentication, or final user application; those belong to later milestones.

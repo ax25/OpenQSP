@@ -134,9 +134,10 @@ The detailed implementation roadmap is maintained in [`design/05-roadmap.md`](de
 
 # Current Status
 
-🚧 **Early Implementation Phase — OpenQSP Core v0.1**
+✅ **Minimum Local Node Core Implemented — OpenQSP Core v0.1**
 
-The design baseline for version 0.1 is complete and implementation of the minimum viable node has started.
+The design baseline and Milestones 1 through 4 are complete. The version 0.1
+minimum local server/core release is implemented.
 
 Currently implemented:
 
@@ -145,11 +146,15 @@ Currently implemented:
 - version 0.1 request and response payload codecs;
 - protocol validation and deterministic error handling;
 - automated protocol conformance tests against canonical binary examples;
-- `tools/frame_tool.py` for inspecting, validating and generating Core frames using the production codec.
+- `tools/frame_tool.py` for inspecting, validating and generating Core frames using the production codec;
+- persistent SQLite storage and the minimum `ServerCore`;
+- maintained multi-user, retry, synchronization, restart and bulletin scenarios.
 
-The next active milestone is the persistent object store.
+The next active milestone is Milestone 5 — the first Internet transport.
 
-A complete server, real Internet transport, APRS transport adapter and end-user application do not exist yet.
+The completed release is a local node core, not a network-facing deployment.
+Real Internet and APRS transports, production authentication, and an end-user
+application do not exist yet.
 
 ---
 
@@ -157,9 +162,9 @@ A complete server, real Internet transport, APRS transport adapter and end-user 
 
 - [x] **Milestone 0 — Design baseline**
 - [x] **Milestone 1 — Protocol codec**
-- [ ] **Milestone 2 — Persistent object store**
-- [ ] **Milestone 3 — Minimum server core**
-- [ ] **Milestone 4 — Multi-user scenarios and end-to-end tests**
+- [x] **Milestone 2 — Persistent object store**
+- [x] **Milestone 3 — Minimum server core**
+- [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
 - [ ] **Milestone 5 — Internet transport**
 - [ ] **Milestone 6 — APRS transport profile and simulator**
 - [ ] **Milestone 7 — User application**
