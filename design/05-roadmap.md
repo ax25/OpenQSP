@@ -6,6 +6,8 @@ This document defines the planned evolution of OpenQSP through small, verifiable
 
 A milestone is complete only when its stated acceptance criteria are satisfied. Design documents describe the required behaviour; implementation milestones prove that behaviour with working code and automated tests.
 
+Development and laboratory tools evolve alongside the implementation. They are permanent project tools, not disposable test scripts. Their role and progression are described in `../tools/README.md`.
+
 ---
 
 ## 1. Current project phase
@@ -35,7 +37,7 @@ Relevant documents:
 - `08-node-storage.md`;
 - `09-protocol-examples.md`.
 
-The next active milestone is the minimum server core.
+The next active milestone is the protocol codec.
 
 ---
 
@@ -71,7 +73,15 @@ Scope:
 - encode and decode every version 0.1 request and response;
 - enforce field limits and UTF-8 rules;
 - expose typed in-memory request and response objects;
-- reject malformed, truncated and oversized frames safely.
+- reject malformed, truncated and oversized frames safely;
+- create `tools/frame_tool.py` as the first interactive protocol laboratory tool.
+
+`frame_tool.py` must use the production codec and support at least:
+
+- decoding a hexadecimal Core frame into named fields;
+- encoding supported operations from human-readable arguments;
+- validating frames and reporting the protocol error category;
+- displaying canonical hexadecimal output suitable for comparison with `09-protocol-examples.md`.
 
 Acceptance criteria:
 
@@ -80,7 +90,8 @@ Acceptance criteria:
 - every documented invalid vector is rejected with the expected error category;
 - unknown versions, operations and flags are handled as specified;
 - tests cover all operation types and boundary sizes;
-- the codec has no dependency on sockets, APRS, WebSocket or database code.
+- `frame_tool.py` can inspect and generate the same canonical frames used by the automated tests;
+- the codec and frame tool have no dependency on sockets, APRS, WebSocket or database code.
 
 ---
 
@@ -98,6 +109,8 @@ Initial implementation target:
 - separate message and bulletin sequence spaces;
 - indexes for mailbox and bulletin retrieval.
 
+Development scenarios should begin exercising storage behaviour directly, including duplicate submissions, conflicts, cursor progression and restart persistence.
+
 Acceptance criteria:
 
 - a new message is stored atomically and receives a stable sequence;
@@ -109,7 +122,8 @@ Acceptance criteria:
 - complete bulletins can be retrieved by identifier;
 - data and sequence state survive process restart;
 - cursor and pagination behaviour matches `03-protocol.md` and `08-node-storage.md`;
-- automated tests cover rollback and restart scenarios.
+- automated tests cover rollback and restart scenarios;
+- repeatable storage scenarios exist under `tools/scenarios/` or the equivalent test harness.
 
 ---
 
@@ -133,6 +147,10 @@ Supported client operations:
 - `GET_NEW_BULLETINS`;
 - `GET_BULLETIN`.
 
+This milestone also introduces `tools/client_sim.py`, a development client that emulates one OpenQSP user and calls the server core through the same public development interface used by scenario tests.
+
+The simulator must use the real protocol codec. It must not bypass protocol semantics by directly manipulating database rows or internal server objects.
+
 Acceptance criteria:
 
 - the authenticated callsign is used as message author;
@@ -142,17 +160,29 @@ Acceptance criteria:
 - partial multi-item responses never advance a client cursor without `END`;
 - malformed frames do not crash or corrupt the node;
 - responses reproduce the binary protocol exactly;
+- `client_sim.py` can send and retrieve data as an explicitly selected test callsign;
 - all tests run without a network connection.
 
 Completion of this milestone defines the first functioning OpenQSP node core.
 
 ---
 
-## 6. Milestone 4 - Local reference client and end-to-end test
+## 6. Milestone 4 - Multi-user scenarios and end-to-end test
 
 **Status: planned**
 
-Objective: prove the complete version 0.1 workflow with a small command-line client or test harness.
+Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
+
+Required scenarios include at least:
+
+- two users exchanging a private message;
+- identical message retry after a lost application acknowledgement;
+- conflicting reuse of an object identifier;
+- incremental mailbox synchronization;
+- empty mailbox synchronization;
+- pagination and `has_more`;
+- node restart with persistent state;
+- bulletin header synchronization and complete bulletin retrieval.
 
 Acceptance criteria:
 
@@ -161,9 +191,10 @@ Acceptance criteria:
 - the recipient can synchronize messages incrementally;
 - bulletin headers and complete bulletins can be retrieved;
 - synchronization resumes correctly after client and node restarts;
-- the entire workflow is exercised by an automated end-to-end test.
+- scenarios are repeatable and do not depend on manual database editing;
+- the complete workflow is exercised by automated end-to-end tests.
 
-This client is a development tool, not the final user application.
+The reference client and scenarios are development tools, not the final user application.
 
 ---
 
@@ -179,22 +210,25 @@ The exact choice between TCP, HTTP, WebSocket or another framing method will be 
 - one authenticated or development-authenticated callsign;
 - a way to return one or more response frames.
 
+`client_sim.py` should gain an Internet transport mode so the same development client can compare local-core and remote-node behaviour.
+
 Acceptance criteria:
 
 - remote clients can perform every version 0.1 operation;
 - reconnecting does not lose stored state or change synchronization semantics;
 - connection state is not treated as OpenQSP identity;
-- transport code does not duplicate protocol or domain rules.
+- transport code does not duplicate protocol or domain rules;
+- the same core scenarios can be executed through the Internet transport.
 
 Production-grade authentication may remain a later milestone, but development authentication must be visibly marked as non-production.
 
 ---
 
-## 8. Milestone 6 - APRS transport profile
+## 8. Milestone 6 - APRS transport profile and simulator
 
 **Status: deferred**
 
-Objective: define and implement OpenQSP carriage over APRS after the node core is stable.
+Objective: define, simulate and implement OpenQSP carriage over APRS after the node core is stable.
 
 Required design work before implementation:
 
@@ -207,7 +241,22 @@ Required design work before implementation:
 - channel rate control;
 - proactive delivery while the user is locally active.
 
-Acceptance criteria will include successful exchange over APRS-IS before testing over RF.
+Before APRS-IS or RF testing, implement `tools/aprs_sim.py` or equivalent to transform between complete OpenQSP Core frames and the defined APRS carriage representation.
+
+The simulator should support controlled fault injection for at least:
+
+- fragment loss;
+- duplicate fragments;
+- fragment reordering;
+- delayed fragments;
+- lost acknowledgements.
+
+Acceptance criteria include:
+
+- canonical OpenQSP frames survive APRS encode, fragmentation, reassembly and decode unchanged;
+- documented fault scenarios behave predictably;
+- successful exchange is demonstrated locally through the simulator;
+- successful exchange is then demonstrated over APRS-IS before testing over RF.
 
 APRS must remain a transport adapter and must not redefine OpenQSP object or protocol semantics.
 
@@ -233,7 +282,20 @@ The application platform and framework do not affect the Core protocol.
 
 ---
 
-## 10. Later extensions
+## 10. Test and laboratory layers
+
+OpenQSP development uses four complementary levels:
+
+1. **Unit tests** - verify codec, storage and server functions in isolation.
+2. **Protocol vectors** - verify exact binary compatibility with `09-protocol-examples.md`.
+3. **Laboratory and scenario tools** - emulate users, workflows and later unreliable transports.
+4. **Real transports** - verify the same behaviour over Internet, APRS-IS and eventually RF.
+
+Laboratory tools must reuse production protocol code wherever possible. They must not become an alternative implementation of OpenQSP semantics.
+
+---
+
+## 11. Later extensions
 
 The following are intentionally outside the minimum version and require separate design decisions:
 
@@ -252,22 +314,24 @@ These features must not be added to the version 0.1 core merely because the data
 
 ---
 
-## 11. Immediate implementation order
+## 12. Immediate implementation order
 
 The next development work should proceed in this order:
 
-1. protocol codec and tests;
-2. SQLite schema and storage implementation;
-3. minimum server-core request handler;
-4. local reference client and end-to-end tests;
-5. first Internet transport;
-6. APRS transport profile and implementation.
+1. protocol package, codec and automated tests;
+2. `frame_tool.py` using the production codec;
+3. SQLite schema and storage implementation plus storage scenarios;
+4. minimum server-core request handler;
+5. `client_sim.py` and multi-user scenarios;
+6. automated local end-to-end tests;
+7. first Internet transport and remote simulator mode;
+8. APRS transport profile, `aprs_sim.py`, APRS-IS and finally RF.
 
 Work may overlap where dependencies permit, but a milestone must satisfy its acceptance criteria before it is considered complete.
 
 ---
 
-## 12. Minimum server release definition
+## 13. Minimum server release definition
 
 The first minimum server release is complete when Milestones 1 through 4 are complete.
 
@@ -281,6 +345,7 @@ It must demonstrate that:
 - bulletin headers and bodies can be retrieved;
 - protocol errors are deterministic;
 - state survives restart;
+- the same behaviour can be reproduced through maintained development tools and automated scenarios;
 - all required behaviour is covered by automated tests.
 
 A real APRS adapter, graphical application and production authentication are not required for this first release.
