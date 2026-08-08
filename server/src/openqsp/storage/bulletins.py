@@ -13,10 +13,13 @@ from ._common import (
     InvalidCursorError,
     SequenceExhaustedError,
     StorageIntegrityError,
+    require_nonzero_u32,
     require_u32,
+    validate_clock_value,
+    validate_retrieval_limit,
+    validate_stored_u32,
 )
 from .database import Database
-from .messages import _clock_value, _require_limit, _stored_u32
 
 
 @dataclass(frozen=True)
@@ -53,7 +56,7 @@ class BulletinStore:
 
     def get_new_bulletins(self, *, since: int, limit: int) -> BulletinPage:
         require_u32("since", since)
-        _require_limit(limit)
+        validate_retrieval_limit(limit)
         with closing(self._database.connect()) as connection:
             connection.execute("BEGIN")
             try:
@@ -62,7 +65,7 @@ class BulletinStore:
                 ).fetchone()
                 if state is None:
                     raise StorageIntegrityError("bulletin sequence state is missing")
-                highest = _stored_u32(
+                highest = validate_stored_u32(
                     state["last_value"], "bulletin high-water", allow_zero=True
                 )
                 if since > highest:
@@ -83,7 +86,7 @@ class BulletinStore:
         )
 
     def get_bulletin(self, *, sequence: int) -> StoredBulletin | None:
-        require_u32("sequence", sequence)
+        require_nonzero_u32("sequence", sequence)
         with closing(self._database.connect()) as connection:
             row = connection.execute(
                 "SELECT sequence, created_at, accepted_at, author, title, body FROM bulletins WHERE sequence = ?",
@@ -108,13 +111,13 @@ class BulletinStore:
                 ).fetchone()
                 if state is None:
                     raise StorageIntegrityError("bulletin sequence state is missing")
-                last = _stored_u32(
+                last = validate_stored_u32(
                     state["last_value"], "bulletin high-water", allow_zero=True
                 )
                 if last == MAX_U32:
                     raise SequenceExhaustedError("bulletin sequence is exhausted")
                 sequence = last + 1
-                accepted_at = _clock_value(self._clock())
+                accepted_at = validate_clock_value(self._clock())
                 connection.execute(
                     "INSERT INTO bulletins(sequence, created_at, accepted_at, author, title, body) VALUES (?, ?, ?, ?, ?, ?)",
                     (sequence, created_at, accepted_at, author, title, body_bytes),
@@ -131,8 +134,10 @@ class BulletinStore:
 
 
 def _stored_header(row: sqlite3.Row) -> StoredBulletinHeader:
-    sequence = _stored_u32(row["sequence"], "bulletin sequence")
-    created_at = _stored_u32(row["created_at"], "bulletin created_at", allow_zero=True)
+    sequence = validate_stored_u32(row["sequence"], "bulletin sequence")
+    created_at = validate_stored_u32(
+        row["created_at"], "bulletin created_at", allow_zero=True
+    )
     author, title = row["author"], row["title"]
     if not isinstance(author, str) or not isinstance(title, str):
         raise StorageIntegrityError("bulletin author or title is not text")

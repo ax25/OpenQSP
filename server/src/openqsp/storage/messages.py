@@ -9,16 +9,16 @@ from contextlib import closing
 from dataclasses import dataclass
 
 from ._common import (
-    MAX_SQLITE_INTEGER,
     MAX_U32,
     InvalidCursorError,
     SequenceExhaustedError,
     StorageIntegrityError,
     require_u32,
+    validate_clock_value,
+    validate_retrieval_limit,
+    validate_stored_u32,
 )
 from .database import Database
-
-MAX_RETRIEVAL_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class MessageStore:
     def get_new_messages(self, *, callsign: str, since: int, limit: int) -> MessagePage:
         """Return one page from a recipient's independent sequence space."""
         require_u32("since", since)
-        _require_limit(limit)
+        validate_retrieval_limit(limit)
         if not isinstance(callsign, str):
             raise TypeError("callsign must be a string")
         with closing(self._database.connect()) as connection:
@@ -58,13 +58,29 @@ class MessageStore:
                     "SELECT last_value FROM mailbox_sequences WHERE recipient = ?",
                     (callsign,),
                 ).fetchone()
-                highest = (
-                    0
-                    if state is None
-                    else _stored_u32(
+                maximum_row = connection.execute(
+                    "SELECT MAX(mailbox_sequence) FROM messages WHERE recipient = ?",
+                    (callsign,),
+                ).fetchone()
+                maximum = maximum_row[0]
+                if state is None:
+                    if maximum is not None:
+                        raise StorageIntegrityError(
+                            "mailbox has messages but no sequence state"
+                        )
+                    highest = 0
+                else:
+                    highest = validate_stored_u32(
                         state["last_value"], "mailbox high-water", allow_zero=True
                     )
-                )
+                    if maximum is not None:
+                        maximum = validate_stored_u32(
+                            maximum, "highest persisted message sequence"
+                        )
+                        if highest < maximum:
+                            raise StorageIntegrityError(
+                                "mailbox high-water is behind persisted messages"
+                            )
                 if since > highest:
                     raise InvalidCursorError(
                         f"message cursor {since} is ahead of mailbox high-water {highest}"
@@ -103,14 +119,14 @@ class MessageStore:
                 last = (
                     0
                     if row is None
-                    else _stored_u32(
+                    else validate_stored_u32(
                         row["last_value"], "mailbox high-water", allow_zero=True
                     )
                 )
                 if last == MAX_U32:
                     raise SequenceExhaustedError("mailbox sequence is exhausted")
                 sequence = last + 1
-                accepted_at = _clock_value(self._clock())
+                accepted_at = validate_clock_value(self._clock())
                 connection.execute(
                     """INSERT INTO mailbox_sequences(recipient, last_value) VALUES (?, ?)
                        ON CONFLICT(recipient) DO UPDATE SET last_value = excluded.last_value""",
@@ -128,40 +144,11 @@ class MessageStore:
                 raise
 
 
-def _require_limit(limit: int) -> None:
-    if (
-        not isinstance(limit, int)
-        or isinstance(limit, bool)
-        or not 1 <= limit <= MAX_RETRIEVAL_LIMIT
-    ):
-        raise ValueError(
-            f"limit must be an integer between 1 and {MAX_RETRIEVAL_LIMIT}"
-        )
-
-
-def _clock_value(value: object) -> int:
-    if (
-        not isinstance(value, int)
-        or isinstance(value, bool)
-        or not 0 <= value <= MAX_SQLITE_INTEGER
-    ):
-        raise ValueError("clock must return a non-negative SQLite integer")
-    return value
-
-
-def _stored_u32(value: object, field: str, *, allow_zero: bool = False) -> int:
-    if (
-        not isinstance(value, int)
-        or isinstance(value, bool)
-        or not (0 if allow_zero else 1) <= value <= MAX_U32
-    ):
-        raise StorageIntegrityError(f"{field} is not a valid unsigned 32-bit integer")
-    return value
-
-
 def _stored_message(row: sqlite3.Row) -> StoredMessage:
-    sequence = _stored_u32(row["mailbox_sequence"], "message sequence")
-    created_at = _stored_u32(row["created_at"], "message created_at", allow_zero=True)
+    sequence = validate_stored_u32(row["mailbox_sequence"], "message sequence")
+    created_at = validate_stored_u32(
+        row["created_at"], "message created_at", allow_zero=True
+    )
     accepted_at = row["accepted_at"]
     author, recipient, body = row["author"], row["recipient"], row["body"]
     if (
