@@ -1,0 +1,80 @@
+"""Immutable in-memory models for OpenQSP version 0.1 operations."""
+
+from dataclasses import dataclass
+
+from .constants import AckStatus, ErrorCode, Operation
+
+
+@dataclass(frozen=True)
+class SendMessage:
+    message_id: int
+    created_at: int
+    recipient: str
+    body: str
+
+
+@dataclass(frozen=True)
+class GetNewMessages:
+    since: int
+    max: int
+
+
+@dataclass(frozen=True)
+class GetNewBulletins:
+    since: int
+    max: int
+
+
+@dataclass(frozen=True)
+class GetBulletin:
+    bulletin_id: int
+
+
+@dataclass(frozen=True)
+class Message:
+    sequence: int
+    message_id: int
+    created_at: int
+    author: str
+    recipient: str
+    body: str
+
+
+@dataclass(frozen=True)
+class BulletinHeader:
+    sequence: int
+    bulletin_id: int
+    created_at: int
+    author: str
+    title: str
+
+
+@dataclass(frozen=True)
+class Bulletin:
+    bulletin_id: int
+    created_at: int
+    author: str
+    title: str
+    body: str
+
+
+@dataclass(frozen=True)
+class End:
+    request_operation: Operation
+    returned_count: int
+    next_since: int
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class Ack:
+    object_id: int
+    status: AckStatus
+
+
+@dataclass(frozen=True)
+class Error:
+    # Zero is permitted when the request operation cannot be determined.
+    request_operation: Operation | int
+    error_code: ErrorCode
+    detail: str
