@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Emulate one OpenQSP user against a persistent local ServerCore."""
+"""Emulate one OpenQSP user against a local Core or development TCP node."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import socket
 import sys
 from typing import Protocol
 
@@ -31,6 +32,7 @@ from openqsp.protocol import (  # noqa: E402
     encode_frame,
 )
 from openqsp.protocol.errors import ProtocolError  # noqa: E402
+from openqsp.protocol.constants import HEADER_SIZE, MAX_FRAME_SIZE  # noqa: E402
 from openqsp.server import ServerCore  # noqa: E402
 from openqsp.storage import BulletinStore, Database, MessageStore  # noqa: E402
 
@@ -52,6 +54,123 @@ class LocalCoreTransport:
     def exchange(self, callsign: str, request_frame: bytes) -> list[bytes]:
         """Forward an exchange without interpreting any protocol frames."""
         return self._core.handle_frame(callsign, request_frame)
+
+
+class TransportError(RuntimeError):
+    """Base class for failures moving frames to a remote node."""
+
+
+class ConnectionFailed(TransportError):
+    """A TCP connection could not be established or was lost."""
+
+
+class DevelopmentHandshakeError(TransportError):
+    """The development-only callsign handshake was rejected or malformed."""
+
+
+class TruncatedResponseError(TransportError):
+    """The peer closed part way through a response frame."""
+
+
+class TcpTransport:
+    """Exchange frames with the development TCP server.
+
+    A fresh connection is deliberately used for every exchange.  Response
+    boundaries are found from the request/response operation contract rather
+    than connection closure, so this remains compatible with the server's
+    reusable connections while avoiding a client-side session manager.
+    """
+
+    _TERMINATORS = {
+        Operation.SEND_MESSAGE: {Operation.ACK, Operation.ERROR},
+        Operation.GET_NEW_MESSAGES: {Operation.END, Operation.ERROR},
+        Operation.GET_NEW_BULLETINS: {Operation.END, Operation.ERROR},
+        Operation.GET_BULLETIN: {Operation.BULLETIN, Operation.ERROR},
+    }
+
+    def __init__(self, host: str, port: int, *, timeout: float = 5.0) -> None:
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+
+    def exchange(self, callsign: str, request_frame: bytes) -> list[bytes]:
+        try:
+            request_operation = Operation(request_frame[1])
+            terminators = self._TERMINATORS[request_operation]
+        except (IndexError, ValueError, KeyError) as exc:
+            raise ValueError("request is not a supported client operation") from exc
+
+        try:
+            connection = socket.create_connection(
+                (self.host, self.port), timeout=self.timeout
+            )
+        except OSError as exc:
+            raise ConnectionFailed(
+                f"could not connect to {self.host}:{self.port}: {exc}"
+            ) from exc
+
+        with connection:
+            connection.settimeout(self.timeout)
+            try:
+                connection.sendall(f"CALLSIGN {callsign}\n".encode("ascii"))
+                handshake = self._receive_line(connection, 32)
+                if handshake != b"OK\n":
+                    raise DevelopmentHandshakeError(
+                        f"development callsign handshake returned {handshake!r}"
+                    )
+                connection.sendall(request_frame)
+
+                frames: list[bytes] = []
+                while True:
+                    frame = self._receive_frame(connection)
+                    frames.append(frame)
+                    try:
+                        response_operation = Operation(frame[1])
+                    except ValueError:
+                        # The production decoder will report the protocol error.
+                        return frames
+                    if response_operation in terminators:
+                        return frames
+            except TransportError:
+                raise
+            except (OSError, UnicodeEncodeError) as exc:
+                raise ConnectionFailed(f"TCP exchange failed: {exc}") from exc
+
+    @staticmethod
+    def _receive_line(connection: socket.socket, maximum: int) -> bytes:
+        line = bytearray()
+        while len(line) < maximum:
+            chunk = connection.recv(1)
+            if not chunk:
+                raise ConnectionFailed("server closed during development handshake")
+            line.extend(chunk)
+            if chunk == b"\n":
+                return bytes(line)
+        raise DevelopmentHandshakeError("development handshake response is too long")
+
+    @classmethod
+    def _receive_frame(cls, connection: socket.socket) -> bytes:
+        header = cls._receive_exact(connection, HEADER_SIZE, header=True)
+        frame_size = HEADER_SIZE + header[3]
+        if frame_size > MAX_FRAME_SIZE:  # Defensive if the header grows later.
+            raise TransportError(f"response frame exceeds {MAX_FRAME_SIZE} bytes")
+        return header + cls._receive_exact(
+            connection, frame_size - HEADER_SIZE, header=False
+        )
+
+    @staticmethod
+    def _receive_exact(
+        connection: socket.socket, size: int, *, header: bool
+    ) -> bytes:
+        data = bytearray()
+        while len(data) < size:
+            chunk = connection.recv(size - len(data))
+            if not chunk:
+                if data or not header:
+                    raise TruncatedResponseError("server closed during response frame")
+                raise ConnectionFailed("server closed before sending a response")
+            data.extend(chunk)
+        return bytes(data)
 
 
 class DevelopmentClient:
@@ -110,7 +229,10 @@ def completed_cursor(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, type=Path, help="persistent SQLite DB")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--db", type=Path, help="local mode: persistent SQLite DB")
+    mode.add_argument("--tcp-host", help="remote mode: development TCP node host")
+    parser.add_argument("--tcp-port", type=int, default=8023, help="remote TCP port")
     parser.add_argument(
         "--callsign",
         required=True,
@@ -199,12 +321,14 @@ def _print_response(response: ProtocolObject) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    database = Database(args.db)
-    database.initialize()
-    bulletin_store = BulletinStore(database)
 
     try:
         if args.command == "seed-bulletin":
+            if args.db is None:
+                raise ValueError("seed-bulletin is available only in local --db mode")
+            database = Database(args.db)
+            database.initialize()
+            bulletin_store = BulletinStore(database)
             # This is node/test setup, deliberately separated from client
             # operations. Encoding validates fields before direct store setup.
             bulletin = Bulletin(
@@ -227,11 +351,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  status: {outcome.result.name}")
             return 0
 
-        core = ServerCore(
-            message_store=MessageStore(database), bulletin_store=bulletin_store
-        )
-        responses = LocalCoreClient(core, args.callsign).request(_request(args))
-    except (ProtocolError, TypeError, ValueError) as exc:
+        if args.tcp_host is not None:
+            print(
+                f"REMOTE DEVELOPMENT TCP {args.tcp_host}:{args.tcp_port}",
+                file=sys.stderr,
+            )
+            client = DevelopmentClient(
+                TcpTransport(args.tcp_host, args.tcp_port), args.callsign
+            )
+        else:
+            database = Database(args.db)
+            database.initialize()
+            bulletin_store = BulletinStore(database)
+            core = ServerCore(
+                message_store=MessageStore(database), bulletin_store=bulletin_store
+            )
+            client = LocalCoreClient(core, args.callsign)
+        responses = client.request(_request(args))
+    except (ProtocolError, TransportError, TypeError, ValueError) as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 

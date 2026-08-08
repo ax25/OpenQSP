@@ -79,11 +79,11 @@ The exact CLI syntax may evolve, but the tool must remain a thin interface over 
 
 ## 3. `client_sim.py`
 
-`frame_tool.py` is the protocol/frame laboratory; `client_sim.py` is a local
-logical client that sends production-encoded frames to `ServerCore`. It is not
-a network client and opens no listener or connection. Each invocation uses the
-explicit callsign as authenticated context and a persistent SQLite node
-database, so the same file can be reused to observe restarts.
+`frame_tool.py` is the protocol/frame laboratory; `client_sim.py` is a logical
+client that sends production-encoded frames either directly to `ServerCore` or
+to the development TCP server. Each invocation uses an explicit callsign. In
+local mode a persistent SQLite node database can be reused to observe restarts;
+in remote mode the node owns persistence.
 
 It emulates one explicit OpenQSP user and generates real OpenQSP requests using the production codec.
 
@@ -100,6 +100,23 @@ python tools/client_sim.py --db /tmp/openqsp.db --callsign EA3GNU \
   get-bulletin --id 123
 ```
 
+For explicit remote mode, first run the development node and then address it
+with `--tcp-host` (and optionally `--tcp-port`):
+
+```bash
+PYTHONPATH=server/src python -m openqsp.server.tcp \
+  --host 127.0.0.1 --port 8023 --database /tmp/openqsp-remote.db
+
+python tools/client_sim.py --tcp-host 127.0.0.1 --tcp-port 8023 \
+  --callsign EA3GNU get-new-messages --since 0 --max 20
+```
+
+Remote mode uses one TCP connection per request, performs the development-only
+`CALLSIGN` handshake, reads complete frames from the byte stream, and stops at
+the terminal response defined for that request. This handshake is not
+production authentication. Bulletin seeding remains local node/test setup and
+is deliberately unavailable through TCP.
+
 Version 0.1 has no bulletin-publication wire operation. For laboratory setup,
 the explicitly labelled development command below validates and seeds a
 bulletin through `BulletinStore`; it is node setup, not a simulated client
@@ -112,9 +129,11 @@ python tools/client_sim.py --db /tmp/openqsp.db --callsign EA9SRC \
 ```
 
 All four client commands construct a production protocol object, call
-`encode_frame()`, pass the bytes to `ServerCore.handle_frame()`, and decode the
-returned bytes with `decode_frame()`. A future milestone may add transport
-modes to the same simulator without changing these user-level operations.
+`encode_frame()`, pass the bytes through the selected transport, and decode the
+returned bytes with `decode_frame()`. Local transport calls
+`ServerCore.handle_frame()` directly; remote transport moves the same bytes
+over TCP. Both transports use the same
+`DevelopmentClient` encoding and decoding path.
 
 The simulator must not:
 
