@@ -232,6 +232,12 @@ The reference client and scenarios are development tools, not the final user app
 
 **Status: next active milestone**
 
+M5.1 establishes the transport-independent application session boundary. It
+tracks the created, active, and closed lifecycle through the shared session
+registry, accepts decoded Core traffic through an asynchronous command-handler
+seam, and provides serialized client and server-initiated sends. Internet
+listeners, authentication, and command dispatch remain subsequent M5 work.
+
 Objective: expose the minimum node through one simple Internet transport.
 
 The exact choice between TCP, HTTP, WebSocket or another framing method will be made when implementation begins. The transport must provide the core with:
