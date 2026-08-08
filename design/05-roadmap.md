@@ -37,7 +37,7 @@ Relevant documents:
 - `08-node-storage.md`;
 - `09-protocol-examples.md`.
 
-The next active milestone is the protocol codec.
+The next active milestone is Milestone 3 - Minimum server core.
 
 ---
 
@@ -63,7 +63,7 @@ Acceptance criteria:
 
 ## 3. Milestone 1 - Protocol codec
 
-**Status: planned**
+**Status: complete**
 
 Objective: implement a transport-independent encoder and decoder for OpenQSP Core frames.
 
@@ -129,7 +129,7 @@ Acceptance criteria:
 
 ## 5. Milestone 3 - Minimum server core
 
-**Status: planned**
+**Status: active**
 
 Objective: connect authenticated request context, protocol codec and persistent storage without implementing a real network transport.
 
