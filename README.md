@@ -134,10 +134,11 @@ The detailed implementation roadmap is maintained in [`design/05-roadmap.md`](de
 
 # Current Status
 
-✅ **Minimum Local Node Core Implemented — OpenQSP Core v0.1**
+✅ **Minimum Node Core and Development TCP Transport Implemented — OpenQSP Core v0.1**
 
-The design baseline and Milestones 1 through 4 are complete. The version 0.1
-minimum local server/core release is implemented.
+The design baseline and Milestones 1 through 5 are complete. The version 0.1
+minimum node supports both local Core execution and development TCP Internet
+transport.
 
 Currently implemented:
 
@@ -148,13 +149,17 @@ Currently implemented:
 - automated protocol conformance tests against canonical binary examples;
 - `tools/frame_tool.py` for inspecting, validating and generating Core frames using the production codec;
 - persistent SQLite storage and the minimum `ServerCore`;
-- maintained multi-user, retry, synchronization, restart and bulletin scenarios.
+- maintained multi-user, retry, synchronization, restart and bulletin scenarios;
+- a TCP server and remote client transport supporting all four v0.1 client
+  operations through production codec, Core, and storage paths;
+- persistent mailbox and bulletin state, cursors, and sequence allocation across
+  TCP reconnects and full node restarts.
 
-The next active milestone is Milestone 5 — the first Internet transport.
-
-The completed release is a local node core, not a network-facing deployment.
-Real Internet and APRS transports, production authentication, and an end-user
-application do not exist yet.
+The TCP connection's `CALLSIGN` handshake is **development-only identification,
+not production authentication**. This implementation is not a production-secure
+deployment: production authentication, TLS, authorization policy, APRS, server
+push, ACTIVE/INACTIVE presence, capability discovery, and an end-user
+application remain future work.
 
 ---
 
@@ -165,7 +170,7 @@ application do not exist yet.
 - [x] **Milestone 2 — Persistent object store**
 - [x] **Milestone 3 — Minimum server core**
 - [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
-- [ ] **Milestone 5 — Internet transport**
+- [x] **Milestone 5 — Internet transport**
 - [ ] **Milestone 6 — APRS transport profile and simulator**
 - [ ] **Milestone 7 — User application**
 
@@ -179,20 +184,24 @@ Later extensions may include additional transports, richer user interaction mode
 
 OpenQSP includes maintained development and laboratory tools that reuse production protocol code.
 
-The first available tool is:
+Available tools include:
 
 ```text
 tools/frame_tool.py
+tools/client_sim.py
 ```
 
-It can:
+`frame_tool.py` can:
 
 - decode a hexadecimal OpenQSP Core frame into named fields;
 - validate frames and report protocol errors;
 - encode supported v0.1 operations from human-readable arguments;
 - produce canonical hexadecimal output suitable for comparison with the protocol specification and automated tests.
 
-Additional simulators and scenario tools will be added as storage, server-core and transport milestones are implemented.
+`client_sim.py` runs the same production-encoded v0.1 operations against either
+a local Core or the development TCP server. Maintained scenarios under
+`tools/scenarios/` exercise multi-user, synchronization, persistence, and
+restart workflows through either environment.
 
 ---
 
