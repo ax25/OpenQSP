@@ -227,6 +227,20 @@ repeating this deterministic scenario. Its output labels `Page 1`, `Page 2`,
 `Final page`, and `Empty follow-up`, and shows every `MESSAGE` sequence plus
 the terminating `END` count, cursor, and `has_more` value.
 
+The M4.7 scenario sends a private message, derives a synchronization cursor
+from the completed `END`, discards every node and storage object, and rebuilds
+the node against the same persistent database file. It then demonstrates
+durable retrieval, an empty synchronization from the pre-restart cursor,
+sequence continuity for a newly stored message, and unchanged mailbox
+isolation:
+
+```bash
+python tools/scenarios/node_restart_persistence.py /tmp/openqsp-m4.7.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this deterministic scenario.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
