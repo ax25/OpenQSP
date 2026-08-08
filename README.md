@@ -203,6 +203,29 @@ a local Core or the development TCP server. Maintained scenarios under
 `tools/scenarios/` exercise multi-user, synchronization, persistence, and
 restart workflows through either environment.
 
+## Reference TCP client
+
+Install the server package in editable mode, then run a node and two interactive
+clients in separate terminals:
+
+```console
+$ python -m pip install -e server
+$ openqsp-server --database /tmp/openqsp.db
+$ openqsp-client --host 127.0.0.1 --port 8023   # terminal 2: EA3AAA
+$ openqsp-client --host 127.0.0.1 --port 8023   # terminal 3: EA3BBB
+```
+
+At the first prompt, `send EA3BBB Hello from EA3AAA` stores a private message.
+At the second, `new` retrieves it using the mailbox cursor. Use `help` for the
+complete command list.
+
+The present TCP handshake is callsign identification only, so the client does
+not ask for or transmit a password. Core v0.1 also has no capability-discovery
+operation, and the current server does not proactively push messages; the
+client's background reader is nevertheless able to receive unsolicited Core
+frames when a transport sends them. These are protocol/server limitations, not
+alternate client-side wire formats.
+
 ---
 
 # Design Philosophy

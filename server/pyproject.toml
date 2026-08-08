@@ -4,6 +4,10 @@ version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = []
 
+[project.scripts]
+openqsp-server = "openqsp.server.tcp:main"
+openqsp-client = "openqsp.client.cli:main"
+
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
