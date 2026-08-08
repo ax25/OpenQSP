@@ -33,6 +33,10 @@ class StorageIntegrityError(RuntimeError):
     """Raised when persisted rows violate the storage schema's invariants."""
 
 
+class InvalidCursorError(ValueError):
+    """Raised when a retrieval cursor is ahead of its global stream."""
+
+
 def length_prefixed(value: bytes) -> bytes:
     """Encode bytes with an eight-byte length prefix for canonical hashes."""
     return len(value).to_bytes(8, "big") + value
