@@ -184,6 +184,9 @@ isolation, suppression of previously delivered messages, and a final empty
 synchronization. M4.5 adds an isolated empty-mailbox synchronization scenario
 covering both `since=0` and a completed cursor, including cursor stability in
 the presence of unrelated mailbox activity.
+M4.6 adds mailbox pagination with a page size of two, response-derived
+`END.next_since` cursors, explicit `has_more` transitions, interleaved global
+message sequences, and checks for ordering, isolation, duplicates, and loss.
 
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
