@@ -7,6 +7,12 @@ import sys
 from openqsp.protocol import Ack, AckStatus, End, Message, Operation
 
 
+TOOLS_ROOT = Path(__file__).parents[3] / "tools"
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from scenario_environment import LocalScenarioEnvironment  # noqa: E402
+
 SCENARIO_PATH = (
     Path(__file__).parents[3] / "tools" / "scenarios" / "message_id_conflict.py"
 )
@@ -18,7 +24,7 @@ SPEC.loader.exec_module(scenario)
 
 
 def test_changed_body_with_stored_message_id_is_rejected(tmp_path) -> None:
-    result = scenario.run_scenario(tmp_path / "node.db")
+    result = scenario.run_scenario(LocalScenarioEnvironment(tmp_path / "node.db"))
 
     assert result.original_send == [
         Ack(scenario.MESSAGE_ID, AckStatus.STORED)

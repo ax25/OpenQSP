@@ -11,7 +11,12 @@ TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import LocalCoreClient, completed_cursor  # noqa: E402
+from client_sim import completed_cursor  # noqa: E402
+from scenario_environment import (  # noqa: E402
+    LocalScenarioEnvironment,
+    ScenarioClient,
+    ScenarioEnvironment,
+)
 from openqsp.protocol import (  # noqa: E402
     Ack,
     AckStatus,
@@ -22,8 +27,6 @@ from openqsp.protocol import (  # noqa: E402
     ProtocolObject,
     SendMessage,
 )
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import Database, MessageStore  # noqa: E402
 
 
 RECIPIENT = "EA3BBB"
@@ -53,7 +56,7 @@ class ScenarioResult:
 
 
 def _send(
-    clients: dict[str, LocalCoreClient], author: str, message: SendMessage
+    clients: dict[str, ScenarioClient], author: str, message: SendMessage
 ) -> list[ProtocolObject]:
     responses = clients[author].request(message)
     expected = [Ack(message.message_id, AckStatus.STORED)]
@@ -69,15 +72,11 @@ def _cursor(responses: list[ProtocolObject]) -> int:
     return cursor
 
 
-def run_scenario(database_path: str | Path) -> ScenarioResult:
+def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     """Synchronize one mailbox three times using only public Core interfaces."""
-    database = Database(database_path)
-    database.initialize()
-    core = ServerCore(message_store=MessageStore(database))
-
     authors = ("EA3AAA", "EA3CCC", "EA3DDD")
-    clients = {callsign: LocalCoreClient(core, callsign) for callsign in authors}
-    recipient = LocalCoreClient(core, RECIPIENT)
+    clients = {callsign: env.client(callsign) for callsign in authors}
+    recipient = env.client(RECIPIENT)
 
     # The other recipient's message deliberately creates a gap in EA3BBB's
     # visible global message sequences (A=1, isolated=2, B=3).
@@ -140,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: incremental_mailbox_sync.py DATABASE", file=sys.stderr)
         return 2
 
-    result = run_scenario(argv[0])
+    result = run_scenario(LocalScenarioEnvironment(argv[0]))
     print("Initial messages sent: A and B to EA3BBB; isolated message to EA3ZZZ")
     for responses in result.initial_sends:
         _print_responses("send", responses)

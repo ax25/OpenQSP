@@ -4,6 +4,12 @@ from pathlib import Path
 import sys
 from openqsp.protocol import Ack, AckStatus, End, Message, Operation
 
+TOOLS_ROOT = Path(__file__).parents[3] / "tools"
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from scenario_environment import LocalScenarioEnvironment  # noqa: E402
+
 SCENARIO_PATH = (
     Path(__file__).parents[3] / "tools" / "scenarios" / "node_restart_persistence.py"
 )
@@ -17,7 +23,7 @@ def _empty(cursor: int) -> list[End]:
     return [End(Operation.GET_NEW_MESSAGES, 0, cursor, False)]
 
 def test_private_mailbox_sync_recovers_across_node_restart(tmp_path) -> None:
-    result = scenario.run_scenario(tmp_path / "persistent-node.db")
+    result = scenario.run_scenario(LocalScenarioEnvironment(tmp_path / "persistent-node.db"))
     assert result.send_a == [Ack(scenario.MESSAGE_A.message_id, AckStatus.STORED)]
     assert len(result.first_sync) == 2
     message_a, first_end = result.first_sync

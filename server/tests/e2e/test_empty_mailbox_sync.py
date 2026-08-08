@@ -7,6 +7,12 @@ import sys
 from openqsp.protocol import Ack, AckStatus, End, Message, Operation
 
 
+TOOLS_ROOT = Path(__file__).parents[3] / "tools"
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from scenario_environment import LocalScenarioEnvironment  # noqa: E402
+
 SCENARIO_PATH = (
     Path(__file__).parents[3] / "tools" / "scenarios" / "empty_mailbox_sync.py"
 )
@@ -18,7 +24,7 @@ SPEC.loader.exec_module(scenario)
 
 
 def test_empty_mailbox_sync_preserves_completed_cursor(tmp_path) -> None:
-    result = scenario.run_scenario(tmp_path / "node.db")
+    result = scenario.run_scenario(LocalScenarioEnvironment(tmp_path / "node.db"))
 
     initial_end = End(Operation.GET_NEW_MESSAGES, 0, 0, False)
     assert result.initial_empty_sync == [initial_end]
