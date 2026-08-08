@@ -178,7 +178,10 @@ identical-message retry after a lost application acknowledgement and verifies
 that it creates neither a duplicate nor a sequence gap. M4.3 demonstrates that
 reusing a stored message identifier with a changed body returns `CONFLICT`,
 leaves the original intact, and consumes no sequence. The remaining Milestone
-4 scenarios and acceptance criteria are still planned.
+4 scenarios and acceptance criteria are still planned. M4.4 implements
+incremental mailbox synchronization with response-derived cursors, mailbox
+isolation, suppression of previously delivered messages, and a final empty
+synchronization.
 
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
