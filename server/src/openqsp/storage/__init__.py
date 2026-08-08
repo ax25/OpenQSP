@@ -1,6 +1,12 @@
 """Persistent storage infrastructure for an OpenQSP node."""
 
-from ._common import InvalidCursorError
+from ._common import (
+    MAX_U32,
+    InvalidCursorError,
+    SequenceExhaustedError,
+    StorageIntegrityError,
+    require_u32,
+)
 from .bulletins import (
     BulletinPage,
     BulletinStore,
@@ -11,10 +17,6 @@ from .database import Database, UnsupportedSchemaVersionError
 from .messages import (
     MessagePage,
     MessageStore,
-    SequenceExhaustedError,
-    StorageIntegrityError,
-    StoreOutcome,
-    StoreResult,
     StoredMessage,
 )
 from .migrations import LATEST_SCHEMA_VERSION
@@ -24,15 +26,15 @@ __all__ = [
     "BulletinStore",
     "Database",
     "LATEST_SCHEMA_VERSION",
+    "MAX_U32",
     "InvalidCursorError",
     "MessagePage",
     "MessageStore",
     "SequenceExhaustedError",
     "StorageIntegrityError",
-    "StoreOutcome",
-    "StoreResult",
     "StoredBulletin",
     "StoredBulletinHeader",
     "StoredMessage",
     "UnsupportedSchemaVersionError",
+    "require_u32",
 ]
