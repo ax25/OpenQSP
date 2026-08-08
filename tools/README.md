@@ -79,20 +79,42 @@ The exact CLI syntax may evolve, but the tool must remain a thin interface over 
 
 ## 3. `client_sim.py`
 
-`client_sim.py` is introduced when the minimum server core exists.
+`frame_tool.py` is the protocol/frame laboratory; `client_sim.py` is a local
+logical client that sends production-encoded frames to `ServerCore`. It is not
+a network client and opens no listener or connection. Each invocation uses the
+explicit callsign as authenticated context and a persistent SQLite node
+database, so the same file can be reused to observe restarts.
 
 It emulates one explicit OpenQSP user and generates real OpenQSP requests using the production codec.
 
-Expected operations include conceptually:
+From the repository root:
 
-```text
-client_sim.py --user EA3GNU send EA1ABC "Hola"
-client_sim.py --user EA1ABC messages
-client_sim.py --user EA1ABC bulletins
-client_sim.py --user EA1ABC bulletin <id>
+```bash
+python tools/client_sim.py --db /tmp/openqsp.db --callsign K1ABC \
+  send-message --to EA3GNU --id 1001 --timestamp 1786200000 --body "Hello"
+python tools/client_sim.py --db /tmp/openqsp.db --callsign EA3GNU \
+  get-new-messages --since 0 --max 20
+python tools/client_sim.py --db /tmp/openqsp.db --callsign EA3GNU \
+  get-new-bulletins --since 0 --max 20
+python tools/client_sim.py --db /tmp/openqsp.db --callsign EA3GNU \
+  get-bulletin --id 123
 ```
 
-In local development mode it may call the node-core interface directly. Later it should gain an Internet transport mode without changing the user-level commands.
+Version 0.1 has no bulletin-publication wire operation. For laboratory setup,
+the explicitly labelled development command below validates and seeds a
+bulletin through `BulletinStore`; it is node setup, not a simulated client
+request:
+
+```bash
+python tools/client_sim.py --db /tmp/openqsp.db --callsign EA9SRC \
+  seed-bulletin --id 123 --timestamp 1786200001 \
+  --title "Node news" --body "Complete bulletin body"
+```
+
+All four client commands construct a production protocol object, call
+`encode_frame()`, pass the bytes to `ServerCore.handle_frame()`, and decode the
+returned bytes with `decode_frame()`. A future milestone may add transport
+modes to the same simulator without changing these user-level operations.
 
 The simulator must not:
 
@@ -193,11 +215,12 @@ The two layers should share production code and canonical fixtures rather than d
 
 ## 7. Current status
 
-The first development tool is available:
+The protocol laboratory and local logical client are available:
 
 ```text
 tools/frame_tool.py
+tools/client_sim.py
 ```
 
-It inspects, validates and generates all OpenQSP Core v0.1 operations by calling
-the production protocol codec directly.
+They use the production protocol codec directly; the client simulator also
+uses the production server core and persistent stores without a network.

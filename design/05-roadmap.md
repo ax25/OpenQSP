@@ -37,7 +37,7 @@ Relevant documents:
 - `08-node-storage.md`;
 - `09-protocol-examples.md`.
 
-The next active milestone is Milestone 3 - Minimum server core.
+The next active milestone is Milestone 4 - Multi-user scenarios and end-to-end test.
 
 ---
 
@@ -129,7 +129,7 @@ Acceptance criteria:
 
 ## 5. Milestone 3 - Minimum server core
 
-**Status: active**
+**Status: complete**
 
 Objective: connect authenticated request context, protocol codec and persistent storage without implementing a real network transport.
 
