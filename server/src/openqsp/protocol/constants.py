@@ -1,0 +1,61 @@
+"""Constants and wire-level enumerations for OpenQSP version 0.1."""
+
+from enum import IntEnum
+
+PROTOCOL_VERSION = 0x01
+HEADER_SIZE = 4
+MAX_PAYLOAD_SIZE = 255
+MAX_FRAME_SIZE = HEADER_SIZE + MAX_PAYLOAD_SIZE
+
+MIN_CALLSIGN_LENGTH = 3
+MAX_CALLSIGN_LENGTH = 12
+MIN_MESSAGE_BODY_LENGTH = 1
+MAX_MESSAGE_BODY_LENGTH = 208
+MIN_BULLETIN_TITLE_LENGTH = 1
+MAX_BULLETIN_TITLE_LENGTH = 64
+MIN_BULLETIN_BODY_LENGTH = 1
+MAX_BULLETIN_BODY_LENGTH = 164
+MIN_RETRIEVAL_MAX = 1
+MAX_RETRIEVAL_MAX = 20
+MAX_ERROR_DETAIL_LENGTH = 64
+
+
+class Operation(IntEnum):
+    """OpenQSP version 0.1 operation codes."""
+
+    SEND_MESSAGE = 0x01
+    GET_NEW_MESSAGES = 0x02
+    GET_NEW_BULLETINS = 0x03
+    GET_BULLETIN = 0x04
+
+    MESSAGE = 0x40
+    BULLETIN_HEADER = 0x41
+    BULLETIN = 0x42
+    END = 0x43
+    ACK = 0x44
+    ERROR = 0x45
+
+
+class AckStatus(IntEnum):
+    """Durable processing outcomes carried by an ACK frame."""
+
+    STORED = 0x00
+    ALREADY_STORED = 0x01
+    REJECTED = 0x02
+    INVALID = 0x03
+    CONFLICT = 0x04
+
+
+class ErrorCode(IntEnum):
+    """Request failure codes carried by an ERROR frame."""
+
+    INVALID_FRAME = 0x01
+    UNSUPPORTED_VERSION = 0x02
+    UNKNOWN_OPERATION = 0x03
+    INVALID_FIELD = 0x04
+    INVALID_CURSOR = 0x05
+    UNAUTHORIZED = 0x06
+    NOT_FOUND = 0x07
+    TOO_LARGE = 0x08
+    BUSY = 0x09
+    INTERNAL_ERROR = 0x0A
