@@ -7,11 +7,10 @@ from openqsp.protocol.errors import (
     InvalidFieldError,
     PayloadLengthError,
     ProtocolDecodeError,
-    ProtocolEncodeError,
     UnknownOperationError,
     UnsupportedVersionError,
 )
-from openqsp.protocol.models import GetBulletin, GetNewMessages
+from openqsp.protocol.models import GetBulletin
 
 
 GET_BULLETIN_FRAME = bytes.fromhex(
@@ -77,16 +76,6 @@ def test_frame_over_maximum_is_rejected_before_dispatch() -> None:
     assert len(oversized) == MAX_FRAME_SIZE + 1
     with pytest.raises(PayloadLengthError, match="maximum"):
         decode_frame(oversized)
-
-
-def test_known_operation_without_m1_3_payload_codec_is_explicit() -> None:
-    with pytest.raises(ProtocolDecodeError, match="deferred to M1.3"):
-        decode_frame(bytes.fromhex("01 02 00 09 00 00 00 00 00 00 00 7C 05"))
-
-
-def test_encode_without_m1_3_payload_codec_is_explicit() -> None:
-    with pytest.raises(ProtocolEncodeError, match="deferred to M1.3"):
-        encode_frame(GetNewMessages(since=124, max=5))
 
 
 def test_payload_codec_validates_required_length_after_common_header() -> None:
