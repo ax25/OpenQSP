@@ -186,8 +186,9 @@ synchronization. M4.5 adds an isolated empty-mailbox synchronization scenario
 covering both `since=0` and a completed cursor, including cursor stability in
 the presence of unrelated mailbox activity.
 M4.6 adds mailbox pagination with a page size of two, response-derived
-`END.next_since` cursors, explicit `has_more` transitions, interleaved global
-mailbox sequences, and checks for ordering, isolation, duplicates, and loss.
+`END.next_since` cursors and explicit `has_more` transitions. Activity is interleaved across
+independent recipient mailboxes while checks preserve mailbox isolation, per-mailbox monotonic
+ordering, correct cursor progression, pagination, and no loss.
 M4.7 implements node-restart recovery by reconstructing the complete local
 node over the same SQLite file. It verifies durable private messages and
 sequence allocation, continued use of a pre-restart `END.next_since` cursor,

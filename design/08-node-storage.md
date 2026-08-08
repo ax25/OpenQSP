@@ -67,10 +67,11 @@ Each message has:
 
 | Field | Meaning |
 |---|---|
+| `recipient` | Normalized recipient callsign. |
 | `mailbox_sequence` | Monotonic unsigned 32-bit sequence in the recipient mailbox. |
 | `author` | Normalized authenticated author callsign. |
-| `recipient` | Normalized recipient callsign. |
-| `created_at` | Creator-supplied timestamp. |
+| `created_at` | Creation timestamp supplied by the creator/client. |
+| `accepted_at` | Node timestamp recorded when the message is durably accepted. |
 | `body` | Complete private-message body. |
 
 A message has exactly one author and one recipient in version 0.1.
@@ -87,12 +88,17 @@ Each bulletin has:
 |---|---|
 | `sequence` | Node-local monotonic unsigned 32-bit sequence and bulletin reference. |
 | `author` | Normalized author callsign. |
-| `created_at` | Creator-supplied timestamp. |
+| `created_at` | Creation timestamp supplied by the creator/client. |
+| `accepted_at` | Node timestamp recorded when the bulletin is durably accepted. |
 | `title` | Mandatory bulletin title. |
 | `body` | Complete bulletin body. |
 
 The node must be able to retrieve bulletin headers and complete bulletins by `sequence`
 efficiently. There is no separate bulletin identifier.
+
+`accepted_at` is server-managed persistent metadata assigned during durable acceptance. It is
+not supplied by the client, is not part of the Core wire representation, and is neither an
+application object identifier, a synchronization cursor nor a transport transaction identifier.
 
 ---
 
@@ -108,7 +114,7 @@ turning its transaction identifier into persistent application data.
 
 ---
 
-## 5. Node-local synchronization sequences
+## 5. Synchronization sequences
 
 ### 5.1 Independent sequence spaces
 
@@ -186,12 +192,12 @@ Message acceptance must run as one atomic transaction:
 
 1. Validate `created_at`, recipient and body, and obtain the author from authenticated context.
 2. Lock or otherwise serialize the recipient mailbox's high-water state.
-3. Allocate the next mailbox sequence and insert the complete message.
+3. Allocate the next mailbox sequence, assign `accepted_at` and insert the complete message.
 4. Advance the mailbox high-water value and commit.
 5. Return `STORED` only after that commit.
 
-Bulletin insertion similarly allocates its one node-local sequence and inserts the bulletin in
-the same transaction.
+Bulletin insertion similarly allocates its one node-local sequence, assigns `accepted_at` and
+inserts the bulletin in the same transaction.
 
 A failed transaction must not consume a sequence as a protocol-visible accepted object. An implementation may leave internal database sequence gaps after rollback, because gaps are valid, but it must never expose a partially stored object.
 
@@ -204,6 +210,7 @@ The node may return `STORED` only after the storage engine confirms that the tra
 At minimum, after `STORED` is returned:
 
 - the complete object must survive a normal process restart;
+- its node-assigned `accepted_at` timestamp must be persisted;
 - indexes and sequence metadata required to retrieve it must be committed;
 - its assigned sequence and mailbox or bulletin high-water state must remain stable.
 
@@ -283,6 +290,7 @@ The initial implementation should not add automatic cleanup policies that are in
 After restart, the node must recover:
 
 - all committed objects;
+- their node-assigned `accepted_at` timestamps;
 - their assigned sequences;
 - each mailbox's and the bulletin stream's high-water state, sufficient to allocate later
   values without reuse.
@@ -302,6 +310,7 @@ Schema changes must be performed through explicit, ordered migrations.
 A migration must preserve:
 
 - immutable application content;
+- node-managed `accepted_at` metadata;
 - mailbox and bulletin sequences;
 - uniqueness constraints;
 - accepted object visibility.
