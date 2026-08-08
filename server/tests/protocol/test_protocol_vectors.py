@@ -145,20 +145,24 @@ def bulletin(*, sequence=1, created_at=1, author=b"EA1ABC", title=b"x", body=b"x
 
 
 @pytest.mark.parametrize(("raw", "error"), [
-    ("02 04 00 08 11 12 13 14 15 16 17 18", UnsupportedVersionError),
-    ("01 04 01 08 11 12 13 14 15 16 17 18", InvalidFieldError),
-    ("01 04 00 08 11 12 13 14", PayloadLengthError),
-    ("01 04 00 08 11 12 13 14 15 16 17 18 FF", PayloadLengthError),
+    ("02 04 00 04 00 00 00 F6", UnsupportedVersionError),
+    ("01 04 01 04 00 00 00 F6", InvalidFieldError),
+    ("01 04 00 04 00 00", PayloadLengthError),
+    ("01 04 00 04 00 00 00 F6 FF", PayloadLengthError),
     ("01 02 00 05 00 00 00 7C 00", InvalidFieldError),
-    ("01 01 00 18 00 00 00 00 00 00 00 00 65 00 00 00 06 45 41 31 41 42 43 04 48 6F 6C 61", InvalidFieldError),
-    ("01 01 00 14 01 02 03 04 05 06 07 08 65 00 00 00 06 45 41 31 41 42 43 00", InvalidFieldError),
-    ("01 01 00 1B 01 02 03 04 05 06 07 08 65 00 00 00 09 45 41 31 41 42 43 2D 31 30 04 48 6F 6C 61", InvalidFieldError),
-    ("01 01 00 16 01 02 03 04 05 06 07 08 65 00 00 00 06 45 41 31 41 42 43 02 C3 28", InvalidFieldError),
+    ("01 01 00 0C 65 00 00 00 06 45 41 31 41 42 43 00", InvalidFieldError),
+    ("01 01 00 13 65 00 00 00 09 45 41 31 41 42 43 2D 31 30 04 48 6F 6C 61", InvalidFieldError),
+    ("01 01 00 0E 65 00 00 00 06 45 41 31 41 42 43 02 C3 28", InvalidFieldError),
     ("01 7F 00 00", UnknownOperationError),
 ])
 def test_all_documented_invalid_vectors(raw: str, error: type[Exception]) -> None:
     with pytest.raises(error):
         decode_frame(bytes.fromhex(raw))
+
+
+def test_legacy_u64_get_bulletin_frame_is_rejected() -> None:
+    with pytest.raises(PayloadLengthError, match="exactly 4 bytes"):
+        decode_frame(bytes.fromhex("01 04 00 08 11 12 13 14 15 16 17 18"))
 
 
 @pytest.mark.parametrize(("operation", "payload"), [

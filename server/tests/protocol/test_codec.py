@@ -104,7 +104,7 @@ def test_payload_codec_validates_required_length_after_common_header() -> None:
         decode_frame(bytes.fromhex("01 04 00 07 11 12 13 14 15 16 17"))
 
 
-def test_payload_codec_rejects_zero_identifier() -> None:
+def test_payload_codec_rejects_zero_sequence() -> None:
     with pytest.raises(InvalidFieldError, match="non-zero"):
         decode_frame(bytes.fromhex("01 04 00 04 00 00 00 00"))
 
