@@ -22,15 +22,17 @@ from openqsp.protocol import (
 from openqsp.server import RequestContext, ServerCore
 
 
-REQUESTS = (
-    SendMessage(1, 1, "N0CALL", "hello"),
-    GetNewMessages(0, 5),
-    GetNewBulletins(0, 5),
-    GetBulletin(1),
+DEFERRED_REQUESTS = (
+    (GetNewMessages(0, 5), Operation.GET_NEW_MESSAGES),
+    (GetNewBulletins(0, 5), Operation.GET_NEW_BULLETINS),
+    (GetBulletin(1), Operation.GET_BULLETIN),
 )
 
 
-@pytest.mark.parametrize(("protocol_request", "operation"), zip(REQUESTS, Operation))
+@pytest.mark.parametrize(
+    ("protocol_request", "operation"),
+    DEFERRED_REQUESTS,
+)
 def test_each_client_request_has_an_explicit_deferred_dispatch(
     protocol_request, operation
 ):

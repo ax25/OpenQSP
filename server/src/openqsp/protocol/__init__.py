@@ -1,7 +1,7 @@
 """Typed definitions for the OpenQSP Core protocol."""
 
 from .constants import AckStatus, ErrorCode, Operation
-from .codec import ProtocolObject, decode_frame, encode_frame
+from .codec import ProtocolObject, decode_frame, encode_frame, validate_callsign
 from .models import (
     Ack,
     Bulletin,
@@ -32,4 +32,5 @@ __all__ = [
     "SendMessage",
     "decode_frame",
     "encode_frame",
+    "validate_callsign",
 ]

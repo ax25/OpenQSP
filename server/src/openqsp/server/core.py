@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from openqsp.protocol import (
     Ack,
+    AckStatus,
     Bulletin,
     BulletinHeader,
     End,
@@ -25,6 +26,7 @@ from openqsp.protocol import (
     SendMessage,
     decode_frame,
     encode_frame,
+    validate_callsign,
 )
 from openqsp.protocol.errors import (
     InvalidFieldError,
@@ -33,7 +35,13 @@ from openqsp.protocol.errors import (
     UnknownOperationError,
     UnsupportedVersionError,
 )
-from openqsp.storage import BulletinStore, MessageStore
+from openqsp.storage import (
+    BulletinStore,
+    MessageStore,
+    SequenceExhaustedError,
+    StorageIntegrityError,
+    StoreResult,
+)
 
 
 @dataclass(frozen=True)
@@ -46,9 +54,8 @@ class RequestContext:
 class ServerCore:
     """Decode and dispatch complete Core frames without transport concerns.
 
-    Stores are injected once so later milestone handlers can use them without
-    creating global state or opening a database as part of dispatch.  M3.1
-    intentionally does not call either store.
+    Stores are injected once so handlers can use them without creating global
+    state or opening a database as part of dispatch.
     """
 
     def __init__(
@@ -76,6 +83,9 @@ class ServerCore:
         try:
             request = decode_frame(frame_bytes)
         except (ProtocolDecodeError, InvalidFieldError) as error:
+            message_id = self._recover_invalid_message_id(frame_bytes)
+            if message_id is not None:
+                return [encode_frame(Ack(message_id, AckStatus.INVALID))]
             response = self._decode_error_response(frame_bytes, error)
             return [] if response is None else [encode_frame(response)]
 
@@ -108,7 +118,79 @@ class ServerCore:
     def _handle_send_message(
         self, context: RequestContext, request: SendMessage
     ) -> list[ProtocolObject]:
-        return [self._not_implemented(Operation.SEND_MESSAGE)]
+        if self._message_store is None:
+            return [
+                Error(
+                    Operation.SEND_MESSAGE,
+                    ErrorCode.BUSY,
+                    "message store unavailable",
+                )
+            ]
+
+        try:
+            author = validate_callsign(
+                context.authenticated_callsign, "authenticated_callsign"
+            )
+        except InvalidFieldError:
+            return [
+                Error(
+                    Operation.SEND_MESSAGE,
+                    ErrorCode.UNAUTHORIZED,
+                    "invalid authenticated callsign",
+                )
+            ]
+
+        try:
+            outcome = self._message_store.store_message(
+                message_id=request.message_id,
+                created_at=request.created_at,
+                author=author,
+                recipient=request.recipient,
+                body=request.body,
+            )
+        except SequenceExhaustedError:
+            return [
+                Error(
+                    Operation.SEND_MESSAGE,
+                    ErrorCode.BUSY,
+                    "message storage exhausted",
+                )
+            ]
+        except StorageIntegrityError:
+            return [
+                Error(
+                    Operation.SEND_MESSAGE,
+                    ErrorCode.INTERNAL_ERROR,
+                    "message storage integrity failure",
+                )
+            ]
+
+        statuses = {
+            StoreResult.STORED: AckStatus.STORED,
+            StoreResult.ALREADY_STORED: AckStatus.ALREADY_STORED,
+            StoreResult.CONFLICT: AckStatus.CONFLICT,
+        }
+        return [Ack(request.message_id, statuses[outcome.result])]
+
+    @staticmethod
+    def _recover_invalid_message_id(frame: object) -> int | None:
+        """Recover only the fixed-width ID from a well-framed SEND_MESSAGE.
+
+        The production codec remains authoritative for all decoding.  This
+        bounded inspection exists solely to implement the protocol requirement
+        that invalid object fields use ACK / INVALID when the ID is available.
+        Header/framing failures and a zero or truncated ID remain ERROR cases.
+        """
+
+        if not isinstance(frame, bytes) or len(frame) < 12 or len(frame) > 259:
+            return None
+        version, operation, flags, payload_length = frame[:4]
+        if (version, operation, flags) != (1, Operation.SEND_MESSAGE, 0):
+            return None
+        if payload_length != len(frame) - 4:
+            return None
+        message_id = int.from_bytes(frame[4:12], "big")
+        return message_id or None
 
     def _handle_get_new_messages(
         self, context: RequestContext, request: GetNewMessages

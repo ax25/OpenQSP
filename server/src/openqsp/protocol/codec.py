@@ -148,6 +148,18 @@ def _callsign_bytes(value: object, field: str) -> bytes:
     return encoded
 
 
+def validate_callsign(value: object, field: str = "callsign") -> str:
+    """Validate and return an already-normalized OpenQSP callsign.
+
+    This deliberately does not normalize input.  It exposes the codec's
+    canonical callsign rules for trusted values that originate outside a
+    frame, such as an authenticated server context.
+    """
+
+    _callsign_bytes(value, field)
+    return cast(str, value)
+
+
 def _decode_callsign(data: bytes, field: str) -> str:
     try:
         value = data.decode("ascii")
