@@ -18,6 +18,7 @@ from .constants import (
     MIN_MESSAGE_BODY_LENGTH,
     MIN_RETRIEVAL_MAX,
     PROTOCOL_VERSION,
+    UNSOLICITED_FLAG,
     AckStatus,
     ErrorCode,
     Operation,
@@ -392,7 +393,7 @@ _ENCODERS: dict[type[object], tuple[Operation, PayloadEncoder]] = {
 }
 
 
-def _decode_header(data: bytes) -> tuple[Operation, bytes]:
+def _decode_header(data: bytes, *, allow_unsolicited: bool = False) -> tuple[Operation, int, bytes]:
     """Validate the complete common frame and return operation and payload."""
     if not isinstance(data, bytes):
         raise ProtocolDecodeError("a Core frame must be bytes")
@@ -407,27 +408,54 @@ def _decode_header(data: bytes) -> tuple[Operation, bytes]:
         operation = Operation(operation_code)
     except ValueError:
         raise UnknownOperationError(f"unknown version 0.1 operation: 0x{operation_code:02x}") from None
-    if flags != 0:
-        raise InvalidFieldError("version 0.1 flags must be 0x00")
+    permitted_flags = UNSOLICITED_FLAG if allow_unsolicited else 0
+    if flags & ~permitted_flags:
+        raise InvalidFieldError(f"unsupported version 0.1 flags: 0x{flags:02x}")
+    if flags & UNSOLICITED_FLAG and operation not in (
+        Operation.MESSAGE,
+        Operation.BULLETIN_HEADER,
+    ):
+        raise InvalidFieldError(
+            "UNSOLICITED is valid only for MESSAGE and BULLETIN_HEADER"
+        )
     actual = len(data) - HEADER_SIZE
     if actual != payload_length:
         raise PayloadLengthError(f"declared payload length does not match the complete frame ({payload_length} declared, {actual} present)")
-    return operation, data[HEADER_SIZE:]
+    return operation, flags, data[HEADER_SIZE:]
 
 
 def decode_frame(data: bytes) -> ProtocolObject:
     """Decode one exact, complete OpenQSP Core frame into a typed object."""
-    operation, payload = _decode_header(data)
+    operation, _, payload = _decode_header(data)
     return _DECODERS[operation](payload)
 
 
-def encode_frame(obj: ProtocolObject) -> bytes:
+def decode_frame_with_flags(data: bytes) -> tuple[ProtocolObject, int]:
+    """Decode a server frame and retain node-originated delivery metadata.
+
+    Request handlers should continue using :func:`decode_frame`, which rejects
+    all flags.  Clients use this variant because the UNSOLICITED flag is needed
+    to separate proactive deliveries from request response items.
+    """
+    operation, flags, payload = _decode_header(data, allow_unsolicited=True)
+    return _DECODERS[operation](payload), flags
+
+
+def encode_frame(obj: ProtocolObject, *, unsolicited: bool = False) -> bytes:
     """Encode one typed object as an OpenQSP Core frame."""
     entry = _ENCODERS.get(type(obj))
     if entry is None:
         raise ProtocolEncodeError(f"unsupported protocol object: {type(obj).__name__}")
     operation, encoder = entry
+    if unsolicited and operation not in (
+        Operation.MESSAGE,
+        Operation.BULLETIN_HEADER,
+    ):
+        raise ProtocolEncodeError(
+            "UNSOLICITED is valid only for MESSAGE and BULLETIN_HEADER"
+        )
     payload = encoder(obj)
     if len(payload) > 0xFF:
         raise ProtocolEncodeError("payload exceeds the version 0.1 maximum size")
-    return bytes((PROTOCOL_VERSION, operation, 0, len(payload))) + payload
+    flags = UNSOLICITED_FLAG if unsolicited else 0
+    return bytes((PROTOCOL_VERSION, operation, flags, len(payload))) + payload

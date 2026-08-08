@@ -19,6 +19,10 @@ MIN_RETRIEVAL_MAX = 1
 MAX_RETRIEVAL_MAX = 20
 MAX_ERROR_DETAIL_LENGTH = 64
 
+# Set only on node-originated MESSAGE and BULLETIN_HEADER frames that are not
+# part of a response to the client's active request.
+UNSOLICITED_FLAG = 0x01
+
 
 class Operation(IntEnum):
     """OpenQSP version 0.1 operation codes."""

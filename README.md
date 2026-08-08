@@ -223,7 +223,8 @@ The present TCP handshake is callsign identification only, so the client does
 not ask for or transmit a password. Core v0.1 also has no capability-discovery
 operation, and the current server does not proactively push messages; the
 client's background reader is nevertheless able to receive unsolicited Core
-frames when a transport sends them. These are protocol/server limitations, not
+frames, marked with the Core `UNSOLICITED` flag, when a transport sends them.
+These are protocol/server limitations, not
 alternate client-side wire formats.
 
 ---

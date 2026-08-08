@@ -26,13 +26,18 @@ from openqsp.protocol import (
     Operation,
     ProtocolObject,
     SendMessage,
-    decode_frame,
+    decode_frame_with_flags,
     encode_frame,
     validate_callsign,
 )
-from openqsp.protocol.constants import HEADER_SIZE, MAX_RETRIEVAL_MAX
+from openqsp.protocol.constants import HEADER_SIZE, MAX_RETRIEVAL_MAX, UNSOLICITED_FLAG
 from openqsp.protocol.errors import InvalidFieldError, ProtocolDecodeError
-from openqsp.server.tcp import HANDSHAKE_ERROR, HANDSHAKE_OK, HANDSHAKE_PREFIX
+from openqsp.transport.tcp import (
+    HANDSHAKE_ERROR,
+    HANDSHAKE_OK,
+    HANDSHAKE_PREFIX,
+    MAX_HANDSHAKE_SIZE,
+)
 
 
 class ClientError(Exception):
@@ -128,7 +133,7 @@ class OpenQSPClient:
             raise AuthenticationError(str(error)) from error
         try:
             self._socket.sendall(HANDSHAKE_PREFIX + callsign.encode("ascii") + b"\n")
-            response = self._read_line(32)
+            response = self._read_line(MAX_HANDSHAKE_SIZE)
         except OSError as error:
             self.close()
             raise ConnectionClosedError(f"connection failed during authentication: {error}") from error
@@ -273,12 +278,18 @@ class OpenQSPClient:
         try:
             while self._socket is not None:
                 header = self._read_exactly(HEADER_SIZE)
-                obj = decode_frame(header + self._read_exactly(header[3]))
+                obj, flags = decode_frame_with_flags(
+                    header + self._read_exactly(header[3])
+                )
                 handler = None
                 with self._condition:
-                    if self._pending_operation is None:
+                    if flags & UNSOLICITED_FLAG:
                         self._events.append(obj)
                         handler = self.event_handler
+                    elif self._pending_operation is None:
+                        raise ClientError(
+                            "server sent an unmarked frame with no active request"
+                        )
                     else:
                         self._responses.append(obj)
                     self._condition.notify_all()
@@ -293,6 +304,8 @@ class OpenQSPClient:
                 self._set_failure(ConnectionClosedError(str(error)))
         except (ProtocolDecodeError, InvalidFieldError, ValueError) as error:
             self._set_failure(ClientError(f"invalid server frame: {error}"))
+        except ClientError as error:
+            self._set_failure(error)
 
     def _complete(self) -> bool:
         if not self._responses:

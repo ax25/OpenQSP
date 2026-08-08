@@ -18,14 +18,14 @@ from openqsp.protocol import validate_callsign
 from openqsp.protocol.constants import HEADER_SIZE, MAX_FRAME_SIZE
 from openqsp.protocol.errors import InvalidFieldError
 from openqsp.storage import BulletinStore, Database, MessageStore
+from openqsp.transport.tcp import (
+    HANDSHAKE_ERROR,
+    HANDSHAKE_OK,
+    HANDSHAKE_PREFIX,
+    MAX_HANDSHAKE_SIZE,
+)
 
 from .core import ServerCore
-
-MAX_HANDSHAKE_SIZE = 32
-HANDSHAKE_PREFIX = b"CALLSIGN "
-HANDSHAKE_OK = b"OK\n"
-HANDSHAKE_ERROR = b"ERROR\n"
-
 
 class TCPServer:
     """Async TCP adapter around one injected :class:`ServerCore`."""
