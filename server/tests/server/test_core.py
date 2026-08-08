@@ -12,7 +12,6 @@ from openqsp.protocol import (
     ErrorCode,
     GetBulletin,
     GetNewBulletins,
-    GetNewMessages,
     Message,
     Operation,
     SendMessage,
@@ -23,7 +22,6 @@ from openqsp.server import RequestContext, ServerCore
 
 
 DEFERRED_REQUESTS = (
-    (GetNewMessages(0, 5), Operation.GET_NEW_MESSAGES),
     (GetNewBulletins(0, 5), Operation.GET_NEW_BULLETINS),
     (GetBulletin(1), Operation.GET_BULLETIN),
 )
