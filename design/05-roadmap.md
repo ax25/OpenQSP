@@ -97,7 +97,7 @@ Acceptance criteria:
 
 ## 4. Milestone 2 - Persistent object store
 
-**Status: planned**
+**Status: complete**
 
 Objective: implement the storage contract defined in `08-node-storage.md`.
 
