@@ -37,6 +37,7 @@ from openqsp.protocol.errors import (
 )
 from openqsp.storage import (
     BulletinStore,
+    InvalidCursorError,
     MessageStore,
     SequenceExhaustedError,
     StorageIntegrityError,
@@ -195,7 +196,71 @@ class ServerCore:
     def _handle_get_new_messages(
         self, context: RequestContext, request: GetNewMessages
     ) -> list[ProtocolObject]:
-        return [self._not_implemented(Operation.GET_NEW_MESSAGES)]
+        if self._message_store is None:
+            return [
+                Error(
+                    Operation.GET_NEW_MESSAGES,
+                    ErrorCode.BUSY,
+                    "message store unavailable",
+                )
+            ]
+
+        try:
+            callsign = validate_callsign(
+                context.authenticated_callsign, "authenticated_callsign"
+            )
+        except InvalidFieldError:
+            return [
+                Error(
+                    Operation.GET_NEW_MESSAGES,
+                    ErrorCode.UNAUTHORIZED,
+                    "invalid authenticated callsign",
+                )
+            ]
+
+        try:
+            page = self._message_store.get_new_messages(
+                callsign=callsign,
+                since=request.since,
+                limit=request.max,
+            )
+        except InvalidCursorError:
+            return [
+                Error(
+                    Operation.GET_NEW_MESSAGES,
+                    ErrorCode.INVALID_CURSOR,
+                    "invalid message cursor",
+                )
+            ]
+        except StorageIntegrityError:
+            return [
+                Error(
+                    Operation.GET_NEW_MESSAGES,
+                    ErrorCode.INTERNAL_ERROR,
+                    "message storage integrity failure",
+                )
+            ]
+
+        responses: list[ProtocolObject] = [
+            Message(
+                message.sequence,
+                message.message_id,
+                message.created_at,
+                message.author,
+                message.recipient,
+                message.body,
+            )
+            for message in page.messages
+        ]
+        responses.append(
+            End(
+                Operation.GET_NEW_MESSAGES,
+                len(page.messages),
+                page.next_since,
+                page.has_more,
+            )
+        )
+        return responses
 
     def _handle_get_new_bulletins(
         self, context: RequestContext, request: GetNewBulletins
