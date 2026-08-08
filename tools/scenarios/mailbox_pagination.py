@@ -18,8 +18,7 @@ from scenario_environment import (  # noqa: E402
     ScenarioEnvironment,
 )
 from openqsp.protocol import (  # noqa: E402
-    Ack,
-    AckStatus,
+    Stored,
     End,
     GetNewMessages,
     Message,
@@ -32,13 +31,13 @@ from openqsp.protocol import (  # noqa: E402
 RECIPIENT = "EA3BBB"
 PAGE_SIZE = 2
 
-MESSAGE_A = SendMessage(0x4D340601, 1_786_500_001, RECIPIENT, "A")
-OTHER_MESSAGE_X = SendMessage(0x4D340602, 1_786_500_002, "EA3ZZZ", "X")
-MESSAGE_B = SendMessage(0x4D340603, 1_786_500_003, RECIPIENT, "B")
-MESSAGE_C = SendMessage(0x4D340604, 1_786_500_004, RECIPIENT, "C")
-OTHER_MESSAGE_Y = SendMessage(0x4D340605, 1_786_500_005, "EA3YYY", "Y")
-MESSAGE_D = SendMessage(0x4D340606, 1_786_500_006, RECIPIENT, "D")
-MESSAGE_E = SendMessage(0x4D340607, 1_786_500_007, RECIPIENT, "E")
+MESSAGE_A = SendMessage(1_786_500_001, RECIPIENT, "A")
+OTHER_MESSAGE_X = SendMessage(1_786_500_002, "EA3ZZZ", "X")
+MESSAGE_B = SendMessage(1_786_500_003, RECIPIENT, "B")
+MESSAGE_C = SendMessage(1_786_500_004, RECIPIENT, "C")
+OTHER_MESSAGE_Y = SendMessage(1_786_500_005, "EA3YYY", "Y")
+MESSAGE_D = SendMessage(1_786_500_006, RECIPIENT, "D")
+MESSAGE_E = SendMessage(1_786_500_007, RECIPIENT, "E")
 
 SUBMISSIONS = (
     ("EA3AAA", MESSAGE_A),
@@ -63,10 +62,10 @@ class ScenarioResult:
 
 def _send(client: ScenarioClient, message: SendMessage) -> list[ProtocolObject]:
     responses = client.request(message)
-    expected = [Ack(message.message_id, AckStatus.STORED)]
+    expected = [Stored()]
     if responses != expected:
         raise AssertionError(
-            f"expected ACK STORED for {message.message_id}, got {responses!r}"
+            f"expected ACK STORED for {message.sequence}, got {responses!r}"
         )
     return responses
 
@@ -106,7 +105,7 @@ def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
 def _describe(response: ProtocolObject) -> str:
     if isinstance(response, Message):
         return (
-            f"MESSAGE sequence={response.sequence} id={response.message_id} "
+            f"MESSAGE sequence={response.sequence} id={response.sequence} "
             f"author={response.author} recipient={response.recipient} "
             f"body={response.body!r}"
         )

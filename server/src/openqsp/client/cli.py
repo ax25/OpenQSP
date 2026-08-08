@@ -18,7 +18,7 @@ COMMAND_HELP = """Commands:
   new                          retrieve private messages after the last cursor
   send <CALLSIGN> <text>       send a title-less private message
   bulletins                    retrieve new bulletin headers
-  read <id>                    retrieve a complete bulletin
+  read <sequence>              retrieve a complete bulletin
   quit                         disconnect and exit"""
 
 
@@ -30,9 +30,9 @@ def format_object(obj: ProtocolObject) -> str:
     if isinstance(obj, Message):
         return f"[{obj.sequence}] {_format_time(obj.created_at)} {obj.author} -> {obj.recipient}: {obj.body}"
     if isinstance(obj, BulletinHeader):
-        return f"[{obj.bulletin_id}] {_format_time(obj.created_at)} {obj.author}: {obj.title}"
+        return f"[{obj.sequence}] {_format_time(obj.created_at)} {obj.author}: {obj.title}"
     if isinstance(obj, Bulletin):
-        return f"[{obj.bulletin_id}] {obj.title}\nFrom: {obj.author} ({_format_time(obj.created_at)})\n{obj.body}"
+        return f"[{obj.sequence}] {obj.title}\nFrom: {obj.author} ({_format_time(obj.created_at)})\n{obj.body}"
     return str(obj)
 
 
@@ -67,18 +67,18 @@ class CommandSession:
             self.message_cursor = end.next_since
             return True, "\n".join(map(format_object, messages)) or "No messages."
         if command == "send" and len(args) >= 2:
-            ack = self.client.send_message(args[0].upper(), " ".join(args[1:]))
-            return True, f"Message {ack.object_id} {ack.status.name.lower()}."
+            self.client.send_message(args[0].upper(), " ".join(args[1:]))
+            return True, "Message stored."
         if command == "bulletins" and not args:
             headers, end = self.client.get_bulletins(self.bulletin_cursor)
             self.bulletin_cursor = end.next_since
             return True, "\n".join(map(format_object, headers)) or "No new bulletins."
         if command == "read" and len(args) == 1:
             try:
-                bulletin_id = int(args[0], 0)
+                sequence = int(args[0], 0)
             except ValueError:
-                return True, "Usage: read <id>"
-            return True, format_object(self.client.get_bulletin(bulletin_id))
+                return True, "Usage: read <sequence>"
+            return True, format_object(self.client.get_bulletin(sequence))
         if command in {"help", "quit", "status", "services", "messages", "new", "send", "bulletins", "read"}:
             usage = next(line.strip() for line in COMMAND_HELP.splitlines() if line.strip().startswith(command))
             return True, f"Usage: {usage}"

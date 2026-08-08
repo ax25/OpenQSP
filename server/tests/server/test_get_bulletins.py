@@ -1,8 +1,7 @@
 """Milestone 3.4 tests for bulletin retrieval through the server core."""
 
 from openqsp.protocol import (
-    Ack,
-    AckStatus,
+    Stored,
     Bulletin,
     BulletinHeader,
     End,
@@ -27,15 +26,15 @@ def _database(tmp_path, name="node.db"):
     return database
 
 
-def _store_bulletin(store, bulletin_id, *, author="EA9SRC"):
+def _store_bulletin(store, sequence, *, author="EA9SRC"):
     outcome = store.store_bulletin(
-        bulletin_id=bulletin_id,
-        created_at=1_000 + bulletin_id,
+
+        created_at=1_000 + sequence,
         author=author,
-        title=f"title {bulletin_id} — exact",
-        body=f"body {bulletin_id} — not a header",
+        title=f"title {sequence} — exact",
+        body=f"body {sequence} — not a header",
     )
-    return outcome.sequence
+    return outcome
 
 
 def _new_responses(core, *, callsign="EA3GNU", since=0, maximum=20):
@@ -45,8 +44,8 @@ def _new_responses(core, *, callsign="EA3GNU", since=0, maximum=20):
     return [decode_frame(frame) for frame in frames]
 
 
-def _bulletin_response(core, bulletin_id, *, callsign="EA3GNU"):
-    frames = core.handle_frame(callsign, encode_frame(GetBulletin(bulletin_id)))
+def _bulletin_response(core, sequence, *, callsign="EA3GNU"):
+    frames = core.handle_frame(callsign, encode_frame(GetBulletin(sequence)))
     return [decode_frame(frame) for frame in frames]
 
 
@@ -60,16 +59,13 @@ def test_empty_store_returns_exactly_one_end(tmp_path):
 
 def test_headers_preserve_all_stored_fields_and_order_without_bodies(tmp_path):
     store = BulletinStore(_database(tmp_path))
-    sequences = [_store_bulletin(store, bulletin_id) for bulletin_id in (3, 1, 2)]
+    sequences = [_store_bulletin(store, sequence) for sequence in (3, 1, 2)]
     persisted = store.get_new_bulletins(since=0, limit=20).headers
 
     responses = _new_responses(ServerCore(bulletin_store=store))
 
     assert responses[:-1] == [
-        BulletinHeader(
-            header.sequence,
-            header.bulletin_id,
-            header.created_at,
+        BulletinHeader(header.sequence, header.created_at,
             header.author,
             header.title,
         )
@@ -84,7 +80,7 @@ def test_headers_preserve_all_stored_fields_and_order_without_bodies(tmp_path):
 
 def test_header_pagination_then_empty_page_has_no_duplicates(tmp_path):
     store = BulletinStore(_database(tmp_path))
-    sequences = [_store_bulletin(store, bulletin_id) for bulletin_id in (1, 2, 3)]
+    sequences = [_store_bulletin(store, sequence) for sequence in (1, 2, 3)]
     core = ServerCore(bulletin_store=store)
 
     first = _new_responses(core, maximum=2)
@@ -113,10 +109,10 @@ def test_invalid_cursor_returns_error_without_end(tmp_path):
 
 def test_complete_bulletin_preserves_every_stored_field_and_is_public(tmp_path):
     store = BulletinStore(_database(tmp_path))
-    _store_bulletin(store, 42, author="F4XYZ")
-    persisted = store.get_bulletin(bulletin_id=42)
+    sequence = _store_bulletin(store, 42, author="F4XYZ")
+    persisted = store.get_bulletin(sequence=sequence)
     expected = Bulletin(
-        persisted.bulletin_id,
+        persisted.sequence,
         persisted.created_at,
         persisted.author,
         persisted.title,
@@ -124,17 +120,17 @@ def test_complete_bulletin_preserves_every_stored_field_and_is_public(tmp_path):
     )
     core = ServerCore(bulletin_store=store)
 
-    assert _bulletin_response(core, 42, callsign="EA3GNU") == [expected]
-    assert _bulletin_response(core, 42, callsign="K1ABC") == [expected]
+    assert _bulletin_response(core, sequence, callsign="EA3GNU") == [expected]
+    assert _bulletin_response(core, sequence, callsign="K1ABC") == [expected]
     assert _new_responses(core, callsign="EA3GNU")[:-1] == _new_responses(
         core, callsign="K1ABC"
     )[:-1]
 
 
-def test_missing_and_private_message_ids_are_bulletin_not_found(tmp_path):
+def test_missing_and_private_sequences_are_bulletin_not_found(tmp_path):
     database = _database(tmp_path)
     MessageStore(database).store_message(
-        message_id=77,
+
         created_at=100,
         author="K1ABC",
         recipient="EA3GNU",
@@ -220,8 +216,8 @@ def test_bulletin_retrieval_survives_database_restart(tmp_path):
 
     headers = _new_responses(core)
     assert headers[-1] == End(Operation.GET_NEW_BULLETINS, 1, sequence, False)
-    assert _bulletin_response(core, 15) == [
-        Bulletin(15, 1_015, "EA9SRC", "title 15 — exact", "body 15 — not a header")
+    assert _bulletin_response(core, sequence) == [
+        Bulletin(sequence, 1_015, "EA9SRC", "title 15 — exact", "body 15 — not a header")
     ]
 
 
@@ -236,7 +232,7 @@ def test_all_milestone_three_operations_share_one_persistent_node(tmp_path):
     send = [
         decode_frame(frame)
         for frame in core.handle_frame(
-            "K1ABC", encode_frame(SendMessage(10, 500, "EA3GNU", "hello"))
+            "K1ABC", encode_frame(SendMessage(500, "EA3GNU", "hello"))
         )
     ]
     messages = [
@@ -246,10 +242,10 @@ def test_all_milestone_three_operations_share_one_persistent_node(tmp_path):
         )
     ]
 
-    assert send == [Ack(10, AckStatus.STORED)]
+    assert send == [Stored()]
     assert messages == [
-        Message(1, 10, 500, "K1ABC", "EA3GNU", "hello"),
+        Message(1, 500, "K1ABC", "EA3GNU", "hello"),
         End(Operation.GET_NEW_MESSAGES, 1, 1, False),
     ]
     assert isinstance(_new_responses(core)[0], BulletinHeader)
-    assert isinstance(_bulletin_response(core, 20)[0], Bulletin)
+    assert isinstance(_bulletin_response(core, 1)[0], Bulletin)

@@ -10,8 +10,7 @@ if str(TOOLS_ROOT) not in sys.path:
 from client_sim import completed_cursor  # noqa: E402
 from scenario_environment import RemoteScenarioEnvironment  # noqa: E402
 from openqsp.protocol import (  # noqa: E402
-    Ack,
-    AckStatus,
+    Stored,
     Bulletin,
     BulletinHeader,
     End,
@@ -29,11 +28,11 @@ from openqsp.protocol import (  # noqa: E402
 SENDER = "EA3AAA"
 RECIPIENT = "EA3BBB"
 UNRELATED = "EA3CCC"
-MESSAGE_A = SendMessage(0x4D550001, 1_786_910_001, RECIPIENT, "M5.5 message A")
-MESSAGE_B = SendMessage(0x4D550002, 1_786_910_002, RECIPIENT, "M5.5 message B")
-MESSAGE_C = SendMessage(0x4D550003, 1_786_910_003, RECIPIENT, "M5.5 after restart")
+MESSAGE_A = SendMessage(1_786_910_001, RECIPIENT, "M5.5 message A")
+MESSAGE_B = SendMessage(1_786_910_002, RECIPIENT, "M5.5 message B")
+MESSAGE_C = SendMessage(1_786_910_003, RECIPIENT, "M5.5 after restart")
 BULLETIN = Bulletin(
-    0x4D550101,
+    1,
     1_786_910_004,
     "EA9SRC",
     "M5.5 node bulletin",
@@ -49,10 +48,7 @@ def _cursor(responses, operation: Operation) -> int:
 
 
 def _assert_message(response, request: SendMessage, sequence: int) -> None:
-    assert response == Message(
-        sequence,
-        request.message_id,
-        request.created_at,
+    assert response == Message(sequence, request.created_at,
         SENDER,
         RECIPIENT,
         request.body,
@@ -69,10 +65,7 @@ def test_milestone5_complete_internet_transport_workflow(tmp_path) -> None:
         env.seed_bulletin(BULLETIN)
 
         assert sender.request(MESSAGE_A) == [
-            Ack(MESSAGE_A.message_id, AckStatus.STORED)
-        ]
-        assert sender.request(MESSAGE_A) == [
-            Ack(MESSAGE_A.message_id, AckStatus.ALREADY_STORED)
+            Stored()
         ]
 
         first_sync = recipient.request(GetNewMessages(0, LIMIT))
@@ -91,7 +84,7 @@ def test_milestone5_complete_internet_transport_workflow(tmp_path) -> None:
             End(Operation.GET_NEW_MESSAGES, 0, 0, False)
         ]
         assert sender.request(MESSAGE_B) == [
-            Ack(MESSAGE_B.message_id, AckStatus.STORED)
+            Stored()
         ]
         second_sync = recipient.request(GetNewMessages(first_cursor, LIMIT))
         assert len(second_sync) == 2
@@ -111,10 +104,7 @@ def test_milestone5_complete_internet_transport_workflow(tmp_path) -> None:
         assert len(bulletin_sync) == 2
         header, bulletin_end = bulletin_sync
         assert isinstance(header, BulletinHeader)
-        assert header == BulletinHeader(
-            header.sequence,
-            BULLETIN.bulletin_id,
-            BULLETIN.created_at,
+        assert header == BulletinHeader(header.sequence, BULLETIN.created_at,
             BULLETIN.author,
             BULLETIN.title,
         )
@@ -122,7 +112,7 @@ def test_milestone5_complete_internet_transport_workflow(tmp_path) -> None:
             Operation.GET_NEW_BULLETINS, 1, header.sequence, False
         )
         bulletin_cursor = _cursor(bulletin_sync, Operation.GET_NEW_BULLETINS)
-        assert recipient.request(GetBulletin(header.bulletin_id)) == [BULLETIN]
+        assert recipient.request(GetBulletin(header.sequence)) == [BULLETIN]
         assert recipient.request(GetBulletin(0x4D55FFFF)) == [
             Error(Operation.GET_BULLETIN, ErrorCode.NOT_FOUND, "bulletin not found")
         ]
@@ -147,10 +137,10 @@ def test_milestone5_complete_internet_transport_workflow(tmp_path) -> None:
         assert recipient.request(GetNewBulletins(bulletin_cursor, LIMIT)) == [
             End(Operation.GET_NEW_BULLETINS, 0, bulletin_cursor, False)
         ]
-        assert recipient.request(GetBulletin(BULLETIN.bulletin_id)) == [BULLETIN]
+        assert recipient.request(GetBulletin(BULLETIN.sequence)) == [BULLETIN]
 
         assert sender.request(MESSAGE_C) == [
-            Ack(MESSAGE_C.message_id, AckStatus.STORED)
+            Stored()
         ]
         post_restart = recipient.request(
             GetNewMessages(pre_restart_cursor, LIMIT)

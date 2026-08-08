@@ -31,10 +31,7 @@ SPEC.loader.exec_module(scenario)
 
 
 def _header(sequence: int, bulletin: Bulletin) -> BulletinHeader:
-    return BulletinHeader(
-        sequence,
-        bulletin.bulletin_id,
-        bulletin.created_at,
+    return BulletinHeader(sequence, bulletin.created_at,
         bulletin.author,
         bulletin.title,
     )
@@ -54,10 +51,10 @@ def test_bulletin_sync_retrieval_and_resume(tmp_path) -> None:
         result.initial_sync, Operation.GET_NEW_BULLETINS
     )
 
-    synchronized_id = first_headers[0].bulletin_id
+    synchronized_id = first_headers[0].sequence
     assert result.retrieved == [scenario.BULLETIN_A]
     retrieved = result.retrieved[0]
-    assert retrieved.bulletin_id == synchronized_id
+    assert retrieved.sequence == synchronized_id
     assert (retrieved.created_at, retrieved.title, retrieved.body) == (
         scenario.BULLETIN_A.created_at,
         scenario.BULLETIN_A.title,
@@ -68,9 +65,9 @@ def test_bulletin_sync_retrieval_and_resume(tmp_path) -> None:
     later_headers = result.incremental_sync[:-1]
     later_end = result.incremental_sync[-1]
     assert later_headers == [_header(3, scenario.BULLETIN_C)]
-    assert len({header.bulletin_id for header in later_headers}) == 1
-    assert not {scenario.BULLETIN_A.bulletin_id, scenario.BULLETIN_B.bulletin_id} & {
-        header.bulletin_id for header in later_headers
+    assert len({header.sequence for header in later_headers}) == 1
+    assert not {scenario.BULLETIN_A.sequence, scenario.BULLETIN_B.sequence} & {
+        header.sequence for header in later_headers
     }
     assert later_end == End(
         Operation.GET_NEW_BULLETINS, 1, result.incremental_cursor, False

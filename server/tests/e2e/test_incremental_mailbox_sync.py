@@ -4,7 +4,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 
-from openqsp.protocol import Ack, AckStatus, End, Message, Operation
+from openqsp.protocol import Stored, End, Message, Operation
 
 
 TOOLS_ROOT = Path(__file__).parents[3] / "tools"
@@ -23,56 +23,50 @@ sys.modules[SPEC.name] = scenario
 SPEC.loader.exec_module(scenario)
 
 
-def _stored_ack(message_id: int) -> list[Ack]:
-    return [Ack(message_id, AckStatus.STORED)]
+def _stored_response() -> list[Stored]:
+    return [Stored()]
 
 
 def test_mailbox_sync_reuses_end_cursors_without_duplicates(tmp_path) -> None:
     result = scenario.run_scenario(LocalScenarioEnvironment(tmp_path / "node.db"))
 
     assert result.initial_sends == [
-        _stored_ack(scenario.MESSAGE_A.message_id),
-        _stored_ack(scenario.OTHER_MESSAGE.message_id),
-        _stored_ack(scenario.MESSAGE_B.message_id),
+        _stored_response(),
+        _stored_response(),
+        _stored_response(),
     ]
     assert result.first_sync == [
-        Message(1, scenario.MESSAGE_A.message_id, scenario.MESSAGE_A.created_at,
+        Message(1, scenario.MESSAGE_A.created_at,
                 "EA3AAA", scenario.RECIPIENT, scenario.MESSAGE_A.body),
-        Message(3, scenario.MESSAGE_B.message_id, scenario.MESSAGE_B.created_at,
+        Message(2, scenario.MESSAGE_B.created_at,
                 "EA3CCC", scenario.RECIPIENT, scenario.MESSAGE_B.body),
-        End(Operation.GET_NEW_MESSAGES, 2, 3, False),
+        End(Operation.GET_NEW_MESSAGES, 2, 2, False),
     ]
     first_messages = result.first_sync[:-1]
     first_end = result.first_sync[-1]
-    assert [message.sequence for message in first_messages] == [1, 3]
+    assert [message.sequence for message in first_messages] == [1, 2]
     assert all(message.recipient == scenario.RECIPIENT for message in first_messages)
-    assert scenario.OTHER_MESSAGE.message_id not in {
-        message.message_id for message in first_messages
-    }
     assert first_end.returned_count == len(first_messages) == 2
     assert first_end.next_since == first_messages[-1].sequence
     assert first_end.has_more is False
     assert result.first_cursor == first_end.next_since
 
     assert result.later_sends == [
-        _stored_ack(scenario.MESSAGE_C.message_id),
-        _stored_ack(scenario.MESSAGE_D.message_id),
+        _stored_response(),
+        _stored_response(),
     ]
     assert result.second_sync == [
-        Message(4, scenario.MESSAGE_C.message_id, scenario.MESSAGE_C.created_at,
+        Message(3, scenario.MESSAGE_C.created_at,
                 "EA3AAA", scenario.RECIPIENT, scenario.MESSAGE_C.body),
-        Message(5, scenario.MESSAGE_D.message_id, scenario.MESSAGE_D.created_at,
+        Message(4, scenario.MESSAGE_D.created_at,
                 "EA3DDD", scenario.RECIPIENT, scenario.MESSAGE_D.body),
-        End(Operation.GET_NEW_MESSAGES, 2, 5, False),
+        End(Operation.GET_NEW_MESSAGES, 2, 4, False),
     ]
     second_messages = result.second_sync[:-1]
     second_end = result.second_sync[-1]
-    assert [message.message_id for message in second_messages] == [
-        scenario.MESSAGE_C.message_id,
-        scenario.MESSAGE_D.message_id,
-    ]
-    assert not {message.message_id for message in first_messages} & {
-        message.message_id for message in second_messages
+    assert [message.sequence for message in second_messages] == [3, 4]
+    assert not {message.sequence for message in first_messages} & {
+        message.sequence for message in second_messages
     }
     assert all(
         message.sequence > first_end.next_since for message in second_messages

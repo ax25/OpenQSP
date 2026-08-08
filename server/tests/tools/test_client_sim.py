@@ -8,8 +8,7 @@ from pathlib import Path
 import pytest
 
 from openqsp.protocol import (
-    Ack,
-    AckStatus,
+    Stored,
     End,
     Message,
     Operation,
@@ -55,10 +54,10 @@ def test_local_transport_forwards_and_returns_frames_unchanged() -> None:
 def test_development_client_encodes_and_decodes_only_outside_transport(
     monkeypatch,
 ) -> None:
-    request = SendMessage(1001, 1786200000, "EA3GNU", "Hello")
+    request = SendMessage(1786200000, "EA3GNU", "Hello")
     encoded_request = b"client encoded request"
     encoded_responses = [b"encoded response"]
-    decoded_response = Ack(1001, AckStatus.STORED)
+    decoded_response = Stored()
 
     class FakeTransport:
         def __init__(self) -> None:
@@ -92,7 +91,7 @@ def test_development_client_encodes_and_decodes_only_outside_transport(
 
 
 def test_fake_transport_can_be_injected_without_server_core() -> None:
-    response = Ack(77, AckStatus.STORED)
+    response = Stored()
 
     class FakeTransport:
         def __init__(self) -> None:
@@ -103,7 +102,7 @@ def test_fake_transport_can_be_injected_without_server_core() -> None:
             return [encode_frame(response)]
 
     transport = FakeTransport()
-    request = SendMessage(77, 1786200000, "EA3GNU", "Hello")
+    request = SendMessage(1786200000, "EA3GNU", "Hello")
 
     assert client_sim.DevelopmentClient(transport, "K1ABC").request(request) == [
         response
@@ -124,7 +123,7 @@ def test_transport_failure_is_not_decoded_as_a_protocol_response(monkeypatch) ->
 
     with pytest.raises(TransportFailure, match="delivery failed"):
         client_sim.DevelopmentClient(FailingTransport(), "K1ABC").request(
-            SendMessage(77, 1786200000, "EA3GNU", "Hello")
+            SendMessage(1786200000, "EA3GNU", "Hello")
         )
 
     assert decode_calls == []
@@ -134,16 +133,16 @@ def test_local_cli_workflow_persists_across_invocations(tmp_path) -> None:
     common = ("--db", str(tmp_path / "node.db"))
     sent = run(
         *common, "--callsign", "K1ABC", "send-message", "--to", "EA3GNU",
-        "--id", "1001", "--timestamp", "1786200000", "--body", "Hello",
+"--timestamp", "1786200000", "--body", "Hello",
     )
     received = run(
         *common, "--callsign", "EA3GNU", "get-new-messages",
         "--since", "0", "--max", "20",
     )
 
-    assert sent == (0, "ACK\n  object_id: 1001\n  status: STORED\n\n", "")
+    assert sent == (0, "STORED\n\n", "")
     assert received[0] == 0 and received[2] == ""
-    assert "message_id: 1001" in received[1]
+    assert "sequence: 1" in received[1]
     assert "author: K1ABC" in received[1]
     assert "recipient: EA3GNU" in received[1]
     assert "next_since: 1" in received[1]
@@ -152,7 +151,7 @@ def test_local_cli_workflow_persists_across_invocations(tmp_path) -> None:
 def test_development_seed_then_public_bulletin_operations(tmp_path) -> None:
     common = ("--db", str(tmp_path / "node.db"), "--callsign", "EA9SRC")
     seeded = run(
-        *common, "seed-bulletin", "--id", "123", "--timestamp", "1786200001",
+        *common, "seed-bulletin", "--timestamp", "1786200001",
         "--title", "News", "--body", "Complete bulletin",
     )
     headers = run(
@@ -161,7 +160,7 @@ def test_development_seed_then_public_bulletin_operations(tmp_path) -> None:
     )
     bulletin = run(
         "--db", str(tmp_path / "node.db"), "--callsign", "K1ABC",
-        "get-bulletin", "--id", "123",
+        "get-bulletin", "--sequence", "1",
     )
 
     assert seeded[0] == 0 and "DEVELOPMENT SEED" in seeded[1]
@@ -171,7 +170,7 @@ def test_development_seed_then_public_bulletin_operations(tmp_path) -> None:
 
 
 def test_cursor_helper_requires_matching_terminal_end() -> None:
-    item = Message(1, 10, 20, "K1ABC", "EA3GNU", "body")
+    item = Message(1, 20, "K1ABC", "EA3GNU", "body")
     end = End(Operation.GET_NEW_MESSAGES, 1, 1, False)
 
     assert client_sim.completed_cursor([item], Operation.GET_NEW_MESSAGES) is None

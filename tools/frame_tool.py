@@ -19,13 +19,11 @@ if str(SERVER_SRC) not in sys.path:
 from openqsp.protocol.codec import decode_frame, encode_frame  # noqa: E402
 from openqsp.protocol.constants import (  # noqa: E402
     HEADER_SIZE,
-    AckStatus,
     ErrorCode,
     Operation,
 )
 from openqsp.protocol.errors import ProtocolError  # noqa: E402
 from openqsp.protocol.models import (  # noqa: E402
-    Ack,
     Bulletin,
     BulletinHeader,
     End,
@@ -35,6 +33,7 @@ from openqsp.protocol.models import (  # noqa: E402
     GetNewMessages,
     Message,
     SendMessage,
+    Stored,
 )
 
 EnumType = TypeVar("EnumType", bound=IntEnum)
@@ -108,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
     operations = encode.add_subparsers(dest="operation", required=True)
 
     send = operations.add_parser("SEND_MESSAGE")
-    _add_arguments(send, "message_id", "created_at")
+    _add_arguments(send, "created_at")
     send.add_argument("--recipient", required=True)
     send.add_argument("--body", required=True)
 
@@ -117,20 +116,20 @@ def _build_parser() -> argparse.ArgumentParser:
         _add_arguments(retrieval, "since", "max")
 
     get_bulletin = operations.add_parser("GET_BULLETIN")
-    _add_arguments(get_bulletin, "bulletin_id")
+    _add_arguments(get_bulletin, "sequence")
 
     message = operations.add_parser("MESSAGE")
-    _add_arguments(message, "sequence", "message_id", "created_at")
+    _add_arguments(message, "sequence", "created_at")
     for name in ("author", "recipient", "body"):
         message.add_argument(f"--{name}", required=True)
 
     header = operations.add_parser("BULLETIN_HEADER")
-    _add_arguments(header, "sequence", "bulletin_id", "created_at")
+    _add_arguments(header, "sequence", "created_at")
     for name in ("author", "title"):
         header.add_argument(f"--{name}", required=True)
 
     bulletin = operations.add_parser("BULLETIN")
-    _add_arguments(bulletin, "bulletin_id", "created_at")
+    _add_arguments(bulletin, "sequence", "created_at")
     for name in ("author", "title", "body"):
         bulletin.add_argument(f"--{name}", required=True)
 
@@ -139,9 +138,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_arguments(end, "returned_count", "next_since")
     end.add_argument("--has-more", required=True, type=parse_boolean)
 
-    ack = operations.add_parser("ACK")
-    _add_arguments(ack, "object_id")
-    ack.add_argument("--status", required=True, type=enum_parser(AckStatus))
+    operations.add_parser("STORED")
 
     error = operations.add_parser("ERROR")
     error.add_argument("--request-operation", required=True, type=parse_request_operation)
@@ -163,7 +160,7 @@ def build_model(args: argparse.Namespace) -> object:
         "BULLETIN_HEADER": BulletinHeader,
         "BULLETIN": Bulletin,
         "END": End,
-        "ACK": Ack,
+        "STORED": Stored,
         "ERROR": Error,
     }
     model_type = model_types[operation]

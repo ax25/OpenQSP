@@ -10,7 +10,7 @@ TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from scenario_environment import RemoteScenarioEnvironment
+from scenario_environment import RemoteScenarioEnvironment  # noqa: E402
 
 
 E2E_ROOT = Path(__file__).parent
@@ -19,8 +19,6 @@ CASES = (
     ("test_empty_mailbox_sync.py", "test_empty_mailbox_sync_preserves_completed_cursor"),
     ("test_incremental_mailbox_sync.py", "test_mailbox_sync_reuses_end_cursors_without_duplicates"),
     ("test_mailbox_pagination.py", "test_mailbox_paginates_with_end_cursors_and_interleaved_sequences"),
-    ("test_message_retry_after_lost_ack.py", "test_identical_retry_after_lost_ack_is_idempotent"),
-    ("test_message_id_conflict.py", "test_changed_body_with_stored_message_id_is_rejected"),
     ("test_bulletin_sync_retrieval.py", "test_bulletin_sync_retrieval_and_resume"),
     ("test_node_restart_persistence.py", "test_private_mailbox_sync_recovers_across_node_restart"),
     ("test_milestone4_conformance.py", "test_milestone4_complete_local_node_workflow"),

@@ -10,8 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from openqsp.protocol import (
-    Ack,
-    AckStatus,
     Bulletin,
     BulletinHeader,
     End,
@@ -24,6 +22,7 @@ from openqsp.protocol import (
     Operation,
     ProtocolObject,
     SendMessage,
+    Stored,
     decode_frame,
     encode_frame,
     validate_callsign,
@@ -41,7 +40,6 @@ from openqsp.storage import (
     MessageStore,
     SequenceExhaustedError,
     StorageIntegrityError,
-    StoreResult,
 )
 
 
@@ -84,9 +82,6 @@ class ServerCore:
         try:
             request = decode_frame(frame_bytes)
         except (ProtocolDecodeError, InvalidFieldError) as error:
-            message_id = self._recover_invalid_message_id(frame_bytes)
-            if message_id is not None:
-                return [encode_frame(Ack(message_id, AckStatus.INVALID))]
             response = self._decode_error_response(frame_bytes, error)
             return [] if response is None else [encode_frame(response)]
 
@@ -142,8 +137,7 @@ class ServerCore:
             ]
 
         try:
-            outcome = self._message_store.store_message(
-                message_id=request.message_id,
+            self._message_store.store_message(
                 created_at=request.created_at,
                 author=author,
                 recipient=request.recipient,
@@ -166,32 +160,7 @@ class ServerCore:
                 )
             ]
 
-        statuses = {
-            StoreResult.STORED: AckStatus.STORED,
-            StoreResult.ALREADY_STORED: AckStatus.ALREADY_STORED,
-            StoreResult.CONFLICT: AckStatus.CONFLICT,
-        }
-        return [Ack(request.message_id, statuses[outcome.result])]
-
-    @staticmethod
-    def _recover_invalid_message_id(frame: object) -> int | None:
-        """Recover only the fixed-width ID from a well-framed SEND_MESSAGE.
-
-        The production codec remains authoritative for all decoding.  This
-        bounded inspection exists solely to implement the protocol requirement
-        that invalid object fields use ACK / INVALID when the ID is available.
-        Header/framing failures and a zero or truncated ID remain ERROR cases.
-        """
-
-        if not isinstance(frame, bytes) or len(frame) < 12 or len(frame) > 259:
-            return None
-        version, operation, flags, payload_length = frame[:4]
-        if (version, operation, flags) != (1, Operation.SEND_MESSAGE, 0):
-            return None
-        if payload_length != len(frame) - 4:
-            return None
-        message_id = int.from_bytes(frame[4:12], "big")
-        return message_id or None
+        return [Stored()]
 
     def _handle_get_new_messages(
         self, context: RequestContext, request: GetNewMessages
@@ -244,7 +213,6 @@ class ServerCore:
         responses: list[ProtocolObject] = [
             Message(
                 message.sequence,
-                message.message_id,
                 message.created_at,
                 message.author,
                 message.recipient,
@@ -312,7 +280,6 @@ class ServerCore:
         responses: list[ProtocolObject] = [
             BulletinHeader(
                 header.sequence,
-                header.bulletin_id,
                 header.created_at,
                 header.author,
                 header.title,
@@ -355,9 +322,7 @@ class ServerCore:
             ]
 
         try:
-            bulletin = self._bulletin_store.get_bulletin(
-                bulletin_id=request.bulletin_id
-            )
+            bulletin = self._bulletin_store.get_bulletin(sequence=request.sequence)
         except StorageIntegrityError:
             return [
                 Error(
@@ -378,7 +343,7 @@ class ServerCore:
 
         return [
             Bulletin(
-                bulletin.bulletin_id,
+                bulletin.sequence,
                 bulletin.created_at,
                 bulletin.author,
                 bulletin.title,
@@ -396,8 +361,8 @@ class ServerCore:
             return Operation.BULLETIN
         if isinstance(value, End):
             return Operation.END
-        if isinstance(value, Ack):
-            return Operation.ACK
+        if isinstance(value, Stored):
+            return Operation.STORED
         if isinstance(value, Error):
             return Operation.ERROR
         raise TypeError(f"unclassified protocol object: {type(value).__name__}")
