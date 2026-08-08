@@ -175,8 +175,10 @@ M4.1 provides the first required scenario: two authenticated test users
 exchange one private message through the production codec, server core, and
 persistent store, with automated checks for mailbox isolation. M4.2 adds the
 identical-message retry after a lost application acknowledgement and verifies
-that it creates neither a duplicate nor a sequence gap. The remaining
-Milestone 4 scenarios and acceptance criteria are still planned.
+that it creates neither a duplicate nor a sequence gap. M4.3 demonstrates that
+reusing a stored message identifier with a changed body returns `CONFLICT`,
+leaves the original intact, and consumes no sequence. The remaining Milestone
+4 scenarios and acceptance criteria are still planned.
 
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
