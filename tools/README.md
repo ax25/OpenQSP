@@ -21,7 +21,7 @@ Milestone 1
 
 Milestone 2
     storage scenarios
-        -> exercise deduplication, conflicts, cursors and restart persistence
+        -> exercise scoped sequences, cursors and restart persistence
 
 Milestone 3
     client_sim.py
@@ -91,13 +91,13 @@ From the repository root:
 
 ```bash
 python tools/client_sim.py --db /tmp/openqsp.db --callsign K1ABC \
-  send-message --to EA3GNU --id 1001 --timestamp 1786200000 --body "Hello"
+  send-message --to EA3GNU --timestamp 1786200000 --body "Hello"
 python tools/client_sim.py --db /tmp/openqsp.db --callsign EA3GNU \
   get-new-messages --since 0 --max 20
 python tools/client_sim.py --db /tmp/openqsp.db --callsign EA3GNU \
   get-new-bulletins --since 0 --max 20
 python tools/client_sim.py --db /tmp/openqsp.db --callsign EA3GNU \
-  get-bulletin --id 123
+  get-bulletin --sequence 1
 ```
 
 For explicit remote mode, first run the development node and then address it
@@ -124,7 +124,7 @@ request:
 
 ```bash
 python tools/client_sim.py --db /tmp/openqsp.db --callsign EA9SRC \
-  seed-bulletin --id 123 --timestamp 1786200001 \
+  seed-bulletin --timestamp 1786200001 \
   --title "Node news" --body "Complete bulletin body"
 ```
 
@@ -192,9 +192,9 @@ repeating this deterministic scenario.
 
 The M4.5 scenario makes empty synchronization an explicit end-to-end
 guarantee. It checks both a mailbox queried from `since=0` and a previously
-synchronized mailbox queried from its completed `END` cursor. Unrelated
-mailbox activity advances the node's global sequence without changing the
-empty response's cursor:
+synchronized mailbox queried from its completed `END` cursor. Because every
+recipient has an independent mailbox-local sequence space, unrelated mailbox
+activity does not change the empty response's cursor:
 
 ```bash
 python tools/scenarios/empty_mailbox_sync.py /tmp/openqsp-m4.5.db
@@ -203,8 +203,8 @@ python tools/scenarios/empty_mailbox_sync.py /tmp/openqsp-m4.5.db
 Use a new database path (or remove the previous laboratory database) before
 repeating this deterministic scenario.
 
-The M4.6 scenario stores five messages for `EA3BBB`, with two messages for
-other mailboxes interleaved in the global sequence. With a page size of two,
+The M4.6 scenario stores five messages for `EA3BBB`, with activity in two
+other recipients' independent mailboxes interleaved. With a page size of two,
 it follows only each response's completed `END.next_since` through two full
 pages (`has_more=true`), one partial final page (`has_more=false`), and a
 stable empty follow-up:
@@ -231,7 +231,7 @@ python tools/scenarios/node_restart_persistence.py /tmp/openqsp-m4.7.db
 
 The M4.8 scenario uses the development-only bulletin seeding path, then
 synchronizes public bulletin headers and derives its bulletin cursor from the
-terminating response. It retrieves a complete bulletin by the identifier in a
+terminating response. It retrieves a complete bulletin by the sequence in a
 synchronized header, demonstrates incremental and empty synchronization, and
 verifies `NOT_FOUND` for a missing bulletin:
 
@@ -292,7 +292,7 @@ The project uses both automated tests and laboratory tools.
 Automated tests answer questions such as:
 
 - does this function produce the required bytes?;
-- does the storage layer reject a conflict?;
+- does each recipient's mailbox allocate and persist its own sequence space?;
 - does a restart preserve the cursor state?
 
 Laboratory tools answer questions such as:
@@ -300,7 +300,7 @@ Laboratory tools answer questions such as:
 - what exactly does this frame contain?;
 - what happens when EA3GNU sends a message to EA1ABC?;
 - what frames are exchanged during synchronization?;
-- what happens if an acknowledgement or APRS fragment is lost?
+- what happens if a transport-level APRS acknowledgement or fragment is lost?
 
 The two layers should share production code and canonical fixtures rather than duplicate implementations.
 
