@@ -64,10 +64,7 @@ Private messages:
 - can be retrieved incrementally;
 - are identified and synchronized by `(recipient, mailbox-local sequence)`.
 
-Each recipient has an independent sequence space for their mailbox. Reliability
-mechanisms required by an unreliable transport, including retries and
-deduplication for APRS, belong to that transport adapter rather than the Core
-application model.
+Each recipient has an independent sequence space for their mailbox. Reliability mechanisms required by an unreliable transport, including retries and deduplication for APRS, belong to that transport adapter rather than the Core application model.
 
 ## Public Bulletins
 
@@ -78,11 +75,9 @@ Bulletins include:
 - author callsign;
 - title;
 - body;
-- one node-local `u32` sequence used as both the synchronization position and
-  the bulletin reference.
+- one node-local `u32` sequence used as both the synchronization position and the bulletin reference.
 
-Clients can retrieve bulletin headers incrementally and download complete
-bulletins by sequence. There is no separate bulletin identifier.
+Clients can retrieve bulletin headers incrementally and download complete bulletins by sequence. There is no separate bulletin identifier.
 
 ## Synchronization
 
@@ -94,8 +89,7 @@ The initial protocol supports:
 - `GET_NEW_MESSAGES`;
 - `GET_NEW_BULLETINS`;
 - `GET_BULLETIN`;
-- typed `MESSAGE` and bulletin responses, `STORED` for durable successful
-  storage, `END` for completed retrievals, and `ERROR` for failures.
+- typed `MESSAGE` and bulletin responses, `STORED` for durable successful storage, `END` for completed retrievals, and `ERROR` for failures.
 
 Features such as conversations, groups, attachments, read receipts, synchronized read state and federation are intentionally outside the v0.1 core.
 
@@ -143,9 +137,7 @@ The detailed implementation roadmap is maintained in [`design/05-roadmap.md`](de
 
 ✅ **Minimum Node Core and Development TCP Transport Implemented — OpenQSP Core v0.1**
 
-The design baseline and Milestones 1 through 5 are complete. The version 0.1
-minimum node supports both local Core execution and development TCP Internet
-transport.
+The design baseline and Milestones 1 through 5 are complete. The version 0.1 minimum node supports both local Core execution and development TCP Internet transport.
 
 Currently implemented:
 
@@ -157,16 +149,12 @@ Currently implemented:
 - `tools/frame_tool.py` for inspecting, validating and generating Core frames using the production codec;
 - persistent SQLite storage and the minimum `ServerCore`;
 - maintained multi-user, synchronization, restart and bulletin scenarios;
-- a TCP server and remote client transport supporting all four v0.1 client
-  operations through production codec, Core, and storage paths;
-- persistent mailbox and bulletin state, cursors, and sequence allocation across
-  TCP reconnects and full node restarts.
+- a TCP server and remote client transport supporting all four v0.1 client operations through production codec, Core, and storage paths;
+- persistent mailbox and bulletin state, cursors, and sequence allocation across TCP reconnects and full node restarts.
 
-The TCP connection's `CALLSIGN` handshake is **development-only identification,
-not production authentication**. This implementation is not a production-secure
-deployment: production authentication, TLS, authorization policy, APRS, server
-push, ACTIVE/INACTIVE presence, capability discovery, and an end-user
-application remain future work.
+The TCP connection's `CALLSIGN` handshake is **development-only identification, not production authentication**. This implementation is not a production-secure deployment: production authentication, authenticated sessions, server push, ACTIVE/INACTIVE presence, capability discovery, APRS and an end-user application remain future work.
+
+The next active milestone is production identity, sessions and node capability discovery. APRS transport work follows once those shared transport-independent semantics are stable.
 
 ---
 
@@ -178,8 +166,9 @@ application remain future work.
 - [x] **Milestone 3 — Minimum server core**
 - [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
 - [x] **Milestone 5 — Internet transport**
-- [ ] **Milestone 6 — APRS transport profile and simulator**
-- [ ] **Milestone 7 — User application**
+- [ ] **Milestone 6 — Production identity, sessions and node capabilities**
+- [ ] **Milestone 7 — APRS transport profile and simulator**
+- [ ] **Milestone 8 — User application**
 
 The first minimum server release is defined by completion of Milestones 1 through 4.
 
@@ -205,68 +194,27 @@ tools/client_sim.py
 - encode supported v0.1 operations from human-readable arguments;
 - produce canonical hexadecimal output suitable for comparison with the protocol specification and automated tests.
 
-`client_sim.py` runs the same production-encoded v0.1 operations against either
-a local Core or the development TCP server. Maintained scenarios under
-`tools/scenarios/` exercise multi-user, synchronization, persistence, and
-restart workflows through either environment.
+`client_sim.py` runs the same production-encoded v0.1 operations against either a local Core or the development TCP server. Maintained scenarios under `tools/scenarios/` exercise multi-user, synchronization, persistence, and restart workflows through either environment.
 
 ## Reference TCP client
 
-Install the server package in editable mode, then run a node and two interactive
-clients in separate terminals:
+Install the server package in editable mode, then run a node and two interactive clients in separate terminals:
 
 ```console
 $ python -m pip install -e server
 $ openqsp-server --database /tmp/openqsp.db
-$ openqsp-client --host 127.0.0.1 --port 8023   # terminal 2: EA3AAA
-$ openqsp-client --host 127.0.0.1 --port 8023   # terminal 3: EA3BBB
 ```
 
-At the first prompt, `send EA3BBB Hello from EA3AAA` stores a private message.
-At the second, `new` retrieves it using the mailbox cursor. Use `help` for the
-complete command list.
+In another terminal:
 
-The present TCP handshake is callsign identification only, so the client does
-not ask for or transmit a password. Core v0.1 also has no capability-discovery
-operation, and the current server does not proactively push messages.
-`UNSOLICITED` support exists in the protocol, client, and runtime
-infrastructure: the client's background reader can receive Core frames marked
-with that flag when a transport sends them. Full production ACTIVE/INACTIVE
-presence and proactive push behaviour are not yet implemented. These are
-protocol/server limitations, not alternate client-side wire formats.
+```console
+$ openqsp-client --host 127.0.0.1 --port 8000 --callsign EA3AAA
+```
 
----
+And another:
 
-# Design Philosophy
+```console
+$ openqsp-client --host 127.0.0.1 --port 8000 --callsign EA3BBB
+```
 
-OpenQSP is **not an APRS application**.
-
-It is a transport-independent communication platform where APRS is one possible transport adapter.
-
-Every design decision prioritizes:
-
-- simplicity;
-- deterministic behaviour;
-- reliability;
-- low bandwidth usage;
-- tolerance of intermittent links;
-- separation of protocol and transport concerns;
-- long-term maintainability.
-
-The minimum version is intentionally small. New concepts are added only when they are required by real use cases and can be specified without weakening the Core model.
-
----
-
-# Contributing
-
-OpenQSP is in active early implementation.
-
-Protocol behaviour and scope should follow the documents under `design/`, with [`design/05-roadmap.md`](design/05-roadmap.md) defining the current implementation sequence.
-
-Ideas, testing and contributions are welcome as the project evolves.
-
----
-
-# License
-
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
+The reference client uses the current development-only callsign handshake and is intended for laboratory testing, not production authentication.
