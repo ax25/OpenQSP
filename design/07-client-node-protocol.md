@@ -48,7 +48,7 @@ Private messages behave like persistent SMS messages. They:
 
 A private message contains:
 
-- `message_id`;
+- `sequence`;
 - `from`;
 - `to`;
 - `created_at`;
@@ -62,19 +62,17 @@ The maximum body size remains undecided.
 
 Input:
 
-- client-generated `message_id`;
-- `recipient`;
 - `created_at`;
+- `recipient`;
 - `body`.
 
 The authenticated or transport-verified user is the author. The client does not supply a separate author identity.
 
-A successful response is `ACK` with one of these statuses:
+The request contains no message identifier, author or transport transaction identifier. The
+node atomically stores the message and assigns the next sequence in the recipient mailbox.
 
-- `STORED`: the node durably stored the message;
-- `ALREADY_STORED`: the node had already stored the identical message.
-
-Possible failure statuses are `INVALID`, `REJECTED` and `CONFLICT`. Their meanings are those established for acknowledgement statuses in `03-protocol.md`.
+The successful response is `STORED`: the operation committed durably. It carries no message
+identifier. Failures use `ERROR` as established in `03-protocol.md`.
 
 ### 4.2 GET_NEW_MESSAGES
 
@@ -82,10 +80,12 @@ Possible failure statuses are `INVALID`, `REJECTED` and `CONFLICT`. Their meanin
 
 Parameters:
 
-- `since`: the last message sequence or identifier already known by the client;
+- `since`: the last mailbox sequence known by the client;
 - `max`: the maximum number of messages requested.
 
-The exact representation and semantics of `since` will be fixed later by the binary protocol and server data model. In this document it means: return messages newer than the client's current synchronization point.
+`since` is an unsigned 32-bit cursor in the authenticated user's mailbox. `since=0` means no
+previous state. `GET_NEW_MESSAGES since=17` means to return that mailbox's messages whose
+sequence is greater than 17. The mailbox context is part of the cursor's meaning.
 
 The node returns complete private messages, not headers.
 
@@ -99,13 +99,13 @@ MAX 5
 
 Node:
 MESSAGE
-ID 125
+SEQUENCE 125
 FROM EA1ABC
 DATE ...
 BODY Hola, ¿estás disponible esta tarde?
 
 MESSAGE
-ID 126
+SEQUENCE 126
 FROM EA5XYZ
 DATE ...
 BODY He probado la nueva versión.
@@ -123,7 +123,7 @@ Bulletins may be much longer than private messages. Their retrieval therefore us
 
 A bulletin contains:
 
-- `bulletin_id`;
+- `sequence`;
 - `author`;
 - `created_at`;
 - `title`;
@@ -140,12 +140,12 @@ Parameters:
 
 The response contains bulletin headers only. Each header contains:
 
-- `bulletin_id`;
+- `sequence`;
 - `author`;
 - `created_at`;
 - `title`.
 
-The title is mandatory because an identifier alone is not useful to the user.
+The title is mandatory because a sequence alone is not useful to the user.
 
 Example logical exchange:
 
@@ -157,13 +157,13 @@ MAX 5
 
 Node:
 BULLETIN_HEADER
-ID 246
+SEQUENCE 246
 AUTHOR EA1ABC
 DATE ...
 TITLE Concurso VHF septiembre
 
 BULLETIN_HEADER
-ID 247
+SEQUENCE 247
 AUTHOR EA3GNU
 DATE ...
 TITLE Nueva versión OpenQSP
@@ -177,13 +177,13 @@ END
 
 Input:
 
-- `bulletin_id`.
+- `sequence`.
 
 A successful response contains the complete bulletin:
 
 ```text
 BULLETIN
-ID ...
+SEQUENCE ...
 AUTHOR ...
 DATE ...
 TITLE ...
@@ -205,7 +205,9 @@ GET_NEW_BULLETINS SINCE 245
 
 Incremental synchronization reduces APRS traffic. It also avoids repeatedly downloading existing data over Internet transports.
 
-Pagination cursors, sequence-number storage, wraparound and retention behaviour are future details and are not defined here.
+Message cursors use the recipient mailbox's unsigned 32-bit sequence space. Bulletin cursors
+use one node-local unsigned 32-bit sequence space. `END.next_since` uses the corresponding
+space. Wraparound and retention policy remain future details.
 
 ---
 

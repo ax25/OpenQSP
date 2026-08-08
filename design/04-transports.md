@@ -21,13 +21,20 @@ A transport adapter may provide:
 - retries and rate limiting;
 - connection management.
 
-These mechanisms are separate from `ACK_OBJECT`, which confirms an application-level durable processing result.
+These mechanisms are separate from OpenQSP `STORED`, which confirms that a `SEND_MESSAGE`
+database operation committed durably. Transport identifiers and transaction state must not be
+stored in `Message`, `Bulletin` or another persistent Core object.
 
 ---
 
 ## 2. Internet
 
 Internet transports such as TCP or WebSocket may maintain a persistent connection. The transport maps each complete OpenQSP frame to an ordered, reliable byte stream or message and preserves frame boundaries when required by the underlying API.
+
+TCP already supplies reliable, ordered byte delivery. Core therefore does not add a global
+message identifier merely for retransmission or duplicate suppression over TCP or WebSocket.
+`STORED` remains necessary because byte delivery does not prove that a database transaction
+committed.
 
 While the connection is available, the server may deliver new messages or bulletin notifications immediately without waiting for a new `GET` request.
 
@@ -83,7 +90,7 @@ User activity is inferred from normal protocol usage. Any valid request received
 - `GET_BULLETIN`;
 - `SEND_MESSAGE`;
 - `POST_BULLETIN`;
-- `ACK` or another valid client acknowledgement request.
+- another valid client acknowledgement request defined by a future operation.
 
 This list is illustrative only. Any future valid client request also refreshes activity unless that operation is explicitly documented otherwise.
 
@@ -129,6 +136,11 @@ Two nodes may legitimately hold different activity states for the same user.
 Proactive APRS delivery must be rate-limited and must respect channel capacity, duplicate suppression and transport rules.
 
 Detailed timing, retry count, fragmentation and APRS text-safe encoding remain to be specified in a dedicated APRS transport profile.
+
+That profile may use APRS native message IDs and acknowledgements, retries, duplicate
+suppression, fragmentation/reassembly, peer-scoped transaction state and replay of a previous
+Core result. Such identifiers are transport-local and must not become Core object fields. This
+architecture deliberately does not select the production APRS retry algorithm.
 
 ### 3.7 APRS-IS experimental verification
 
@@ -242,7 +254,9 @@ EA3GNU  -> OPENQSP : ack01
 
 The fact that both test directions used ID `01` is not a requirement and does not imply a shared global ID space. Production code must correlate APRS message IDs with the relevant peer and pending outbound message state.
 
-This ACK is an **APRS transport-level acknowledgement**. It confirms reception of the APRS message packet and remains distinct from OpenQSP application-level acknowledgements such as `ACK_OBJECT`.
+This ACK is an **APRS transport-level acknowledgement**. It confirms reception of the APRS
+message packet and remains distinct from the OpenQSP application-level result `STORED`, which
+confirms a durable database commit and carries no message identifier.
 
 #### Verified conclusions
 

@@ -58,8 +58,8 @@ The application protocol defines the shared language used by clients and the ser
 Responsibilities:
 
 - Define operations and message semantics.
-- Define stable identifiers.
-- Define acknowledgements, errors, and synchronization operations.
+- Define scoped persistent references and synchronization sequences.
+- Define durable results, errors, and synchronization operations.
 - Preserve the same meaning across all transports.
 
 The protocol does not define how APRS, Internet, Packet, LoRa, VARA, or any other transport carries its data.

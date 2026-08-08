@@ -56,17 +56,19 @@ Version 0.1 defines two object types:
 - `Message`;
 - `Bulletin`.
 
-Objects are immutable after creation. A retry of the same object reuses the same identifier and content. Corrections create a new object.
+Objects are immutable after creation. Corrections create a new object. Transport retries and
+duplicate detection are not part of persistent object identity.
 
 ### 3.1 Common properties
 
 Each object has:
 
-- `id`: globally unique 64-bit identifier;
 - `type`: object type;
 - `author`: OpenQSP user who created it;
 - `created_at`: UTC creation timestamp;
 - type-specific content.
+
+OpenQSP does not require an identifier that is globally unique across objects or object types.
 
 ---
 
@@ -76,13 +78,17 @@ A `Message` is a private object addressed from one OpenQSP user to another.
 
 Fields:
 
-- `id`;
+- `sequence`: the server-assigned position in the recipient's mailbox;
 - `author`;
 - `recipient`;
 - `created_at`;
 - `body`.
 
 The `recipient` is the OpenQSP user whose mailbox contains the message.
+
+`sequence` is an unsigned 32-bit value scoped to that recipient mailbox. A message is
+identified by `(recipient, sequence)`: `(EA3GNU, 17)` and `(EA3ABC, 17)` are different
+messages. Each mailbox has its own monotonically increasing sequence space.
 
 A message addressed to `EA3GNU` belongs to the `EA3GNU` mailbox. It is not addressed separately to `EA3GNU-1`, `EA3GNU-10` or any device.
 
@@ -94,13 +100,15 @@ A `Bulletin` is a public news object.
 
 Fields:
 
-- `id`;
+- `sequence`: a server-assigned, node-local unsigned 32-bit value;
 - `author`;
 - `created_at`;
 - `title`;
 - `body`.
 
 A bulletin has no recipient.
+Its sequence is both its synchronization position and its bulletin reference; there is no
+separate bulletin identifier.
 
 ---
 
