@@ -227,15 +227,15 @@ repeating this deterministic scenario. Its output labels `Page 1`, `Page 2`,
 `Final page`, and `Empty follow-up`, and shows every `MESSAGE` sequence plus
 the terminating `END` count, cursor, and `has_more` value.
 
-The M4.8 scenario seeds deterministic public bulletins through the existing
-development-only `BulletinStore` mechanism (not a publication operation),
-synchronizes their headers, and retrieves a complete body using an identifier
-from a synchronized header. It derives both resume cursors only from completed
-`END.next_since` responses, then verifies incremental and stable empty
-synchronization plus deterministic `NOT_FOUND` retrieval:
+The M4.7 scenario sends a private message, derives a synchronization cursor
+from the completed `END`, discards every node and storage object, and rebuilds
+the node against the same persistent database file. It then demonstrates
+durable retrieval, an empty synchronization from the pre-restart cursor,
+sequence continuity for a newly stored message, and unchanged mailbox
+isolation:
 
 ```bash
-python tools/scenarios/bulletin_sync_retrieval.py /tmp/openqsp-m4.8.db
+python tools/scenarios/node_restart_persistence.py /tmp/openqsp-m4.7.db
 ```
 
 Use a new database path (or remove the previous laboratory database) before

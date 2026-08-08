@@ -187,11 +187,12 @@ the presence of unrelated mailbox activity.
 M4.6 adds mailbox pagination with a page size of two, response-derived
 `END.next_since` cursors, explicit `has_more` transitions, interleaved global
 message sequences, and checks for ordering, isolation, duplicates, and loss.
-M4.8 implements public bulletin header synchronization with response-derived
-completed cursors and complete bulletin retrieval by synchronized identifier.
-It also demonstrates incremental synchronization, a cursor-stable empty
-follow-up, and deterministic `NOT_FOUND` for a missing bulletin. Milestone 4
-remains in progress pending its final conformance and closure work.
+M4.7 implements node-restart recovery by reconstructing the complete local
+node over the same SQLite file. It verifies durable private messages and
+sequence allocation, continued use of a pre-restart `END.next_since` cursor,
+duplicate-free incremental synchronization, and unchanged mailbox isolation
+through the production client, codec, and server stack. Milestone 4 remains
+open pending bulletin synchronization and complete bulletin retrieval.
 
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
