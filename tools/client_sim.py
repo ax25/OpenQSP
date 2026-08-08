@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+from typing import Protocol
 
 # Make the production package importable from an uninstalled checkout.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -34,24 +35,48 @@ from openqsp.server import ServerCore  # noqa: E402
 from openqsp.storage import BulletinStore, Database, MessageStore  # noqa: E402
 
 
-class LocalCoreClient:
-    """One authenticated user of a local node's public Core interface.
+class ClientTransport(Protocol):
+    """Move one encoded OpenQSP exchange to a node and back."""
 
-    The class deliberately owns no protocol or storage behaviour: it only
-    performs the same encode, handle, and decode steps as the command-line
-    simulator.  Sharing a ``ServerCore`` between instances makes multi-user
-    development scenarios explicit without bypassing the wire protocol.
+    def exchange(self, callsign: str, request_frame: bytes) -> list[bytes]:
+        """Return the encoded response frames for ``request_frame``."""
+        ...
+
+
+class LocalCoreTransport:
+    """Deliver encoded frames directly to a local ``ServerCore``."""
+
+    def __init__(self, core: ServerCore) -> None:
+        self._core = core
+
+    def exchange(self, callsign: str, request_frame: bytes) -> list[bytes]:
+        """Forward an exchange without interpreting any protocol frames."""
+        return self._core.handle_frame(callsign, request_frame)
+
+
+class DevelopmentClient:
+    """One authenticated user communicating through a client transport.
+
+    This class owns request encoding and response decoding.  Its transport is
+    responsible only for moving the resulting encoded frames.
     """
 
-    def __init__(self, core: ServerCore, callsign: str) -> None:
-        self._core = core
+    def __init__(self, transport: ClientTransport, callsign: str) -> None:
+        self._transport = transport
         self.callsign = callsign
 
     def request(self, request: ProtocolObject) -> list[ProtocolObject]:
         """Send one production-encoded request as this authenticated user."""
         request_frame = encode_frame(request)
-        response_frames = self._core.handle_frame(self.callsign, request_frame)
+        response_frames = self._transport.exchange(self.callsign, request_frame)
         return decode_responses(response_frames)
+
+
+class LocalCoreClient(DevelopmentClient):
+    """Backwards-compatible client convenience wrapper for a local core."""
+
+    def __init__(self, core: ServerCore, callsign: str) -> None:
+        super().__init__(LocalCoreTransport(core), callsign)
 
 
 def parse_integer(value: str) -> int:

@@ -5,7 +5,17 @@ from importlib.util import module_from_spec, spec_from_file_location
 from io import StringIO
 from pathlib import Path
 
-from openqsp.protocol import End, Message, Operation
+import pytest
+
+from openqsp.protocol import (
+    Ack,
+    AckStatus,
+    End,
+    Message,
+    Operation,
+    SendMessage,
+    encode_frame,
+)
 
 
 TOOL_PATH = Path(__file__).parents[3] / "tools" / "client_sim.py"
@@ -20,6 +30,104 @@ def run(*args: str) -> tuple[int, str, str]:
     with redirect_stdout(stdout), redirect_stderr(stderr):
         result = client_sim.main(list(args))
     return result, stdout.getvalue(), stderr.getvalue()
+
+
+def test_local_transport_forwards_and_returns_frames_unchanged() -> None:
+    responses = [b"first", b"second"]
+
+    class RecordingCore:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bytes]] = []
+
+        def handle_frame(self, callsign: str, frame: bytes) -> list[bytes]:
+            self.calls.append((callsign, frame))
+            return responses
+
+    core = RecordingCore()
+    transport = client_sim.LocalCoreTransport(core)
+
+    result = transport.exchange("K1ABC", b"encoded request")
+
+    assert core.calls == [("K1ABC", b"encoded request")]
+    assert result is responses
+
+
+def test_development_client_encodes_and_decodes_only_outside_transport(
+    monkeypatch,
+) -> None:
+    request = SendMessage(1001, 1786200000, "EA3GNU", "Hello")
+    encoded_request = b"client encoded request"
+    encoded_responses = [b"encoded response"]
+    decoded_response = Ack(1001, AckStatus.STORED)
+
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bytes]] = []
+
+        def exchange(self, callsign: str, frame: bytes) -> list[bytes]:
+            self.calls.append((callsign, frame))
+            return encoded_responses
+
+    encoded: list[object] = []
+    decoded: list[bytes] = []
+
+    def fake_encode(value):
+        encoded.append(value)
+        return encoded_request
+
+    def fake_decode(frame):
+        decoded.append(frame)
+        return decoded_response
+
+    monkeypatch.setattr(client_sim, "encode_frame", fake_encode)
+    monkeypatch.setattr(client_sim, "decode_frame", fake_decode)
+    transport = FakeTransport()
+
+    result = client_sim.DevelopmentClient(transport, "K1ABC").request(request)
+
+    assert encoded == [request]
+    assert transport.calls == [("K1ABC", encoded_request)]
+    assert decoded == encoded_responses
+    assert result == [decoded_response]
+
+
+def test_fake_transport_can_be_injected_without_server_core() -> None:
+    response = Ack(77, AckStatus.STORED)
+
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bytes]] = []
+
+        def exchange(self, callsign: str, frame: bytes) -> list[bytes]:
+            self.calls.append((callsign, frame))
+            return [encode_frame(response)]
+
+    transport = FakeTransport()
+    request = SendMessage(77, 1786200000, "EA3GNU", "Hello")
+
+    assert client_sim.DevelopmentClient(transport, "K1ABC").request(request) == [
+        response
+    ]
+    assert transport.calls == [("K1ABC", encode_frame(request))]
+
+
+def test_transport_failure_is_not_decoded_as_a_protocol_response(monkeypatch) -> None:
+    class TransportFailure(Exception):
+        pass
+
+    class FailingTransport:
+        def exchange(self, callsign: str, frame: bytes) -> list[bytes]:
+            raise TransportFailure("delivery failed")
+
+    decode_calls: list[bytes] = []
+    monkeypatch.setattr(client_sim, "decode_frame", decode_calls.append)
+
+    with pytest.raises(TransportFailure, match="delivery failed"):
+        client_sim.DevelopmentClient(FailingTransport(), "K1ABC").request(
+            SendMessage(77, 1786200000, "EA3GNU", "Hello")
+        )
+
+    assert decode_calls == []
 
 
 def test_local_cli_workflow_persists_across_invocations(tmp_path) -> None:
