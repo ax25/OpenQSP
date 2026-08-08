@@ -1,5 +1,6 @@
 """Persistent storage infrastructure for an OpenQSP node."""
 
+from .bulletins import BulletinStore
 from .database import Database, UnsupportedSchemaVersionError
 from .messages import (
     InvalidCursorError,
@@ -14,6 +15,7 @@ from .messages import (
 from .migrations import LATEST_SCHEMA_VERSION
 
 __all__ = [
+    "BulletinStore",
     "Database",
     "LATEST_SCHEMA_VERSION",
     "InvalidCursorError",
