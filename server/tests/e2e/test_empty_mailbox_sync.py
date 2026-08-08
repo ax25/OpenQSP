@@ -4,7 +4,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 
-from openqsp.protocol import Ack, AckStatus, End, Message, Operation
+from openqsp.protocol import Stored, End, Message, Operation
 
 
 TOOLS_ROOT = Path(__file__).parents[3] / "tools"
@@ -37,11 +37,11 @@ def test_empty_mailbox_sync_preserves_completed_cursor(tmp_path) -> None:
     ) == 0
 
     assert result.synced_send == [
-        Ack(scenario.SYNCED_MESSAGE.message_id, AckStatus.STORED)
+        Stored()
     ]
     assert len(result.initial_sync) == 2
     assert isinstance(result.initial_sync[0], Message)
-    assert result.initial_sync[0].message_id == scenario.SYNCED_MESSAGE.message_id
+    assert result.initial_sync[0].sequence == 1
     assert isinstance(result.initial_sync[1], End)
     assert result.initial_sync[1].returned_count == 1
     assert result.cursor == scenario.completed_cursor(
@@ -50,7 +50,7 @@ def test_empty_mailbox_sync_preserves_completed_cursor(tmp_path) -> None:
     assert result.cursor == result.initial_sync[1].next_since
 
     assert result.other_send == [
-        Ack(scenario.OTHER_MESSAGE.message_id, AckStatus.STORED)
+        Stored()
     ]
     assert result.repeated_empty_sync == [
         End(Operation.GET_NEW_MESSAGES, 0, result.cursor, False)

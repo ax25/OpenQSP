@@ -3,8 +3,7 @@
 import pytest
 
 from openqsp.protocol import (
-    Ack,
-    AckStatus,
+    Stored,
     Bulletin,
     BulletinHeader,
     End,
@@ -50,7 +49,7 @@ def test_authenticated_identity_is_separate_and_reaches_operation_handler():
             return [Error(Operation.SEND_MESSAGE, ErrorCode.BUSY, "recorded")]
 
     seen = []
-    request = SendMessage(9, 10, "N0CALL", "payload has no author")
+    request = SendMessage(10, "N0CALL", "payload has no author")
     response = RecordingCore().handle_frame("K1ABC", encode_frame(request))
 
     assert seen == [(RequestContext("K1ABC"), request)]
@@ -63,11 +62,11 @@ def test_authenticated_identity_is_separate_and_reaches_operation_handler():
 @pytest.mark.parametrize(
     "response",
     (
-        Message(1, 2, 3, "K1ABC", "N0CALL", "body"),
-        BulletinHeader(1, 2, 3, "K1ABC", "title"),
+        Message(1, 3, "K1ABC", "N0CALL", "body"),
+        BulletinHeader(1, 3, "K1ABC", "title"),
         Bulletin(2, 3, "K1ABC", "title", "body"),
         End(Operation.GET_NEW_MESSAGES, 0, 0, False),
-        Ack(1, AckStatus.STORED),
+        Stored(),
         Error(Operation.GET_BULLETIN, ErrorCode.NOT_FOUND, "missing"),
     ),
 )
@@ -100,7 +99,7 @@ def test_incomplete_header_is_safely_discarded(frame):
         (
             b"\x01\x02\x00\x09" + b"\x00" * 9,
             Operation.GET_NEW_MESSAGES,
-            ErrorCode.INVALID_FIELD,
+            ErrorCode.INVALID_FRAME,
         ),
     ),
 )

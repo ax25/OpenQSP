@@ -22,15 +22,15 @@ def run(*args: str) -> tuple[int, str, str]:
     return result, stdout.getvalue(), stderr.getvalue()
 
 
-GET_BULLETIN = "01 04 00 08 11 12 13 14 15 16 17 18"
-GET_NEW_MESSAGES = "01 02 00 09 00 00 00 00 00 00 00 7C 05"
+GET_BULLETIN = "01 04 00 04 11 12 13 14"
+GET_NEW_MESSAGES = "01 02 00 05 00 00 00 7C 05"
 SEND_MESSAGE = (
-    "01 01 00 18 01 02 03 04 05 06 07 08 65 00 00 00 "
+    "01 01 00 10 65 00 00 00 "
     "06 45 41 31 41 42 43 04 48 6F 6C 61"
 )
-ACK = "01 44 00 09 01 02 03 04 05 06 07 08 00"
+STORED = "01 44 00 00"
 ERROR = "01 45 00 0C 04 07 09 4E 6F 74 20 66 6F 75 6E 64"
-END = "01 43 00 0B 02 01 00 00 00 00 00 00 00 7D 00"
+END = "01 43 00 07 02 01 00 00 00 7D 00"
 
 
 def test_decode_canonical_vector() -> None:
@@ -38,9 +38,9 @@ def test_decode_canonical_vector() -> None:
     assert code == 0
     assert error == ""
     assert "Operation: GET_BULLETIN" in output
-    assert "Frame size: 12 bytes" in output
-    assert "Payload size: 8 bytes" in output
-    assert "bulletin_id: 1230066625199609624 (0x1112131415161718)" in output
+    assert "Frame size: 8 bytes" in output
+    assert "Payload size: 4 bytes" in output
+    assert "sequence: 286397204 (0x11121314)" in output
     assert GET_BULLETIN in output
 
 
@@ -49,7 +49,7 @@ def test_validate_valid_and_invalid_frames() -> None:
     assert valid_code == 0
     assert valid_output == "VALID\nOperation: GET_BULLETIN\n"
 
-    invalid_code, invalid_output, _ = run("validate", "01 04 00 08 11")
+    invalid_code, invalid_output, _ = run("validate", "01 04 00 04 11")
     assert invalid_code != 0
     assert invalid_output.startswith("INVALID\nPayloadLengthError:")
 
@@ -57,17 +57,16 @@ def test_validate_valid_and_invalid_frames() -> None:
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
-        (("GET_BULLETIN", "--bulletin-id", "0x1112131415161718"), GET_BULLETIN),
+        (("GET_BULLETIN", "--sequence", "0x11121314"), GET_BULLETIN),
         (("GET_NEW_MESSAGES", "--since", "124", "--max", "5"), GET_NEW_MESSAGES),
         (
             (
-                "SEND_MESSAGE", "--message-id", "0x0102030405060708",
-                "--created-at", "0x65000000", "--recipient", "EA1ABC",
+                "SEND_MESSAGE", "--created-at", "0x65000000", "--recipient", "EA1ABC",
                 "--body", "Hola",
             ),
             SEND_MESSAGE,
         ),
-        (("ACK", "--object-id", "0x0102030405060708", "--status", "stored"), ACK),
+        (("STORED",), STORED),
         (
             (
                 "ERROR", "--request-operation", "get_bulletin", "--error-code",
@@ -90,8 +89,8 @@ def test_encode_canonical_vectors(arguments: tuple[str, ...], expected: str) -> 
 
 
 def test_decimal_and_hexadecimal_integers_are_equivalent() -> None:
-    decimal = run("encode", "GET_BULLETIN", "--bulletin-id", "1230066625199609624")
-    hexadecimal = run("encode", "GET_BULLETIN", "--bulletin-id", "0x1112131415161718")
+    decimal = run("encode", "GET_BULLETIN", "--sequence", "286397204")
+    hexadecimal = run("encode", "GET_BULLETIN", "--sequence", "0x11121314")
     assert decimal == hexadecimal
 
 
@@ -135,6 +134,6 @@ def test_compact_hexadecimal_is_accepted() -> None:
 
 
 def test_operation_name_is_case_insensitive() -> None:
-    code, output, _ = run("encode", "get_bulletin", "--bulletin-id", "0x1112131415161718")
+    code, output, _ = run("encode", "get_bulletin", "--sequence", "0x11121314")
     assert code == 0
     assert output.strip() == GET_BULLETIN

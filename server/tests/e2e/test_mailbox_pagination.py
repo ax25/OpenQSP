@@ -4,7 +4,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 
-from openqsp.protocol import Ack, AckStatus, End, Message, Operation
+from openqsp.protocol import Stored, End, Message, Operation
 
 
 TOOLS_ROOT = Path(__file__).parents[3] / "tools"
@@ -36,7 +36,7 @@ def test_mailbox_paginates_with_end_cursors_and_interleaved_sequences(tmp_path) 
     result = scenario.run_scenario(LocalScenarioEnvironment(tmp_path / "node.db"))
 
     assert result.sends == [
-        [Ack(message.message_id, AckStatus.STORED)]
+        [Stored()]
         for _, message in scenario.SUBMISSIONS
     ]
     assert len(result.pages) == 4
@@ -50,11 +50,7 @@ def test_mailbox_paginates_with_end_cursors_and_interleaved_sequences(tmp_path) 
     )
 
     assert len(first) == scenario.PAGE_SIZE + 1
-    assert [message.message_id for message in first_messages] == [
-        scenario.MESSAGE_A.message_id,
-        scenario.MESSAGE_B.message_id,
-    ]
-    assert [message.sequence for message in first_messages] == [1, 3]
+    assert [message.sequence for message in first_messages] == [1, 2]
     assert first_end.returned_count == len(first_messages) == scenario.PAGE_SIZE
     assert first_end.next_since == first_messages[-1].sequence
     assert first_end.has_more is True
@@ -64,12 +60,9 @@ def test_mailbox_paginates_with_end_cursors_and_interleaved_sequences(tmp_path) 
 
     assert len(second) == scenario.PAGE_SIZE + 1
     assert result.request_since[1] == first_end.next_since
-    assert [message.message_id for message in second_messages] == [
-        scenario.MESSAGE_C.message_id,
-        scenario.MESSAGE_D.message_id,
-    ]
-    assert not {message.message_id for message in first_messages} & {
-        message.message_id for message in second_messages
+    assert [message.sequence for message in second_messages] == [3, 4]
+    assert not {message.sequence for message in first_messages} & {
+        message.sequence for message in second_messages
     }
     assert second_end.returned_count == len(second_messages) == scenario.PAGE_SIZE
     assert second_end.next_since == second_messages[-1].sequence
@@ -81,9 +74,7 @@ def test_mailbox_paginates_with_end_cursors_and_interleaved_sequences(tmp_path) 
 
     assert len(final) == 2
     assert result.request_since[2] == second_end.next_since
-    assert [message.message_id for message in final_messages] == [
-        scenario.MESSAGE_E.message_id
-    ]
+    assert [message.sequence for message in final_messages] == [5]
     assert final_end.returned_count == len(final_messages) == 1
     assert final_end.next_since == final_messages[-1].sequence
     assert final_end.has_more is False
@@ -100,15 +91,11 @@ def test_mailbox_paginates_with_end_cursors_and_interleaved_sequences(tmp_path) 
     assert empty_end.has_more is False
 
     received = first_messages + second_messages + final_messages
-    received_ids = [message.message_id for message in received]
-    expected_ids = [message.message_id for message in scenario.MAILBOX_MESSAGES]
+    received_ids = [message.sequence for message in received]
+    expected_ids = [1, 2, 3, 4, 5]
     assert received_ids == expected_ids
     assert len(received_ids) == len(set(received_ids))
     assert [message.sequence for message in received] == sorted(
         message.sequence for message in received
     )
     assert all(message.recipient == scenario.RECIPIENT for message in received)
-    assert not {
-        scenario.OTHER_MESSAGE_X.message_id,
-        scenario.OTHER_MESSAGE_Y.message_id,
-    } & set(received_ids)

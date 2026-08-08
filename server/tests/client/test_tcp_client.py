@@ -2,12 +2,14 @@
 
 import asyncio
 
-from openqsp.client import AuthenticationError, OpenQSPClient
+from openqsp.client import AuthenticationError, OpenQSPClient, ProtocolResponseError
 from openqsp.client.cli import CommandSession
 from openqsp.protocol import (
-    Ack,
-    AckStatus,
+    Stored,
+    BulletinHeader,
     End,
+    Error,
+    ErrorCode,
     Message,
     Operation,
     decode_frame,
@@ -46,12 +48,12 @@ def test_connect_authenticate_send_retrieve_and_clean_disconnect(tmp_path):
                 sender.send_message,
                 "EA3BBB",
                 "hello",
-                message_id=123,
+
                 created_at=456,
             )
-            assert ack.status is AckStatus.STORED
+            assert ack == Stored()
             messages, end = await asyncio.to_thread(recipient.get_messages, 0, 5)
-            assert messages == [Message(1, 123, 456, "EA3AAA", "EA3BBB", "hello")]
+            assert messages == [Message(1, 456, "EA3AAA", "EA3BBB", "hello")]
             assert end.next_since == 1
             new_messages, next_end = await asyncio.to_thread(
                 recipient.get_messages, end.next_since, 5
@@ -92,7 +94,7 @@ def test_background_reader_delivers_unsolicited_protocol_event():
         await writer.drain()
         writer.write(
             encode_frame(
-                Message(7, 8, 9, "EA3AAA", "EA3BBB", "pushed"),
+                Message(7, 9, "EA3AAA", "EA3BBB", "pushed"),
                 unsolicited=True,
             )
         )
@@ -111,7 +113,7 @@ def test_background_reader_delivers_unsolicited_protocol_event():
             if received:
                 break
             await asyncio.sleep(0.01)
-        expected = Message(7, 8, 9, "EA3AAA", "EA3BBB", "pushed")
+        expected = Message(7, 9, "EA3AAA", "EA3BBB", "pushed")
         assert received == [expected]
         assert client.get_events() == [expected]
         await asyncio.to_thread(client.close)
@@ -152,11 +154,11 @@ async def _run_interleaving_peer(peer, operation):
 
 
 def test_unsolicited_message_interleaved_before_send_ack_is_an_event():
-    pushed = Message(7, 70, 700, "EA3AAA", "EA3BBB", "while sending")
+    pushed = Message(7, 700, "EA3AAA", "EA3BBB", "while sending")
 
     async def peer(writer, request):
         writer.write(encode_frame(pushed, unsolicited=True))
-        writer.write(encode_frame(Ack(request.message_id, AckStatus.STORED)))
+        writer.write(encode_frame(Stored()))
         await writer.drain()
 
     async def exercise():
@@ -167,10 +169,10 @@ def test_unsolicited_message_interleaved_before_send_ack_is_an_event():
             client.send_message,
             "EA3AAA",
             "request",
-            message_id=71,
+
             created_at=701,
         )
-        assert ack == Ack(71, AckStatus.STORED)
+        assert ack == Stored()
         assert received == [pushed]
         assert client.get_events() == [pushed]
         client.close()
@@ -181,8 +183,8 @@ def test_unsolicited_message_interleaved_before_send_ack_is_an_event():
 
 
 def test_unsolicited_message_interleaved_with_retrieval_is_not_a_response():
-    pushed = Message(8, 80, 800, "EA3CCC", "EA3BBB", "proactive")
-    response = Message(9, 90, 900, "EA3AAA", "EA3BBB", "retrieved")
+    pushed = Message(8, 800, "EA3CCC", "EA3BBB", "proactive")
+    response = Message(9, 900, "EA3AAA", "EA3BBB", "retrieved")
 
     async def peer(writer, request):
         writer.write(encode_frame(pushed, unsolicited=True))
@@ -203,6 +205,57 @@ def test_unsolicited_message_interleaved_with_retrieval_is_not_a_response():
         assert end == End(Operation.GET_NEW_MESSAGES, 1, 9, False)
         assert received == [pushed]
         assert client.get_events() == [pushed]
+        client.close()
+        server.close()
+        await server.wait_closed()
+
+    asyncio.run(exercise())
+
+
+def test_unsolicited_bulletin_header_does_not_complete_pending_request():
+    pushed = BulletinHeader(3, 800, "EA3CCC", "proactive")
+
+    async def peer(writer, request):
+        writer.write(encode_frame(pushed, unsolicited=True))
+        writer.write(encode_frame(Stored()))
+        await writer.drain()
+
+    async def exercise():
+        from openqsp.protocol import SendMessage
+
+        server, client, received = await _run_interleaving_peer(peer, SendMessage)
+        result = await asyncio.to_thread(
+            client.send_message, "EA3AAA", "request", created_at=801
+        )
+        assert result == Stored()
+        assert received == [pushed]
+        assert client.get_events() == [pushed]
+        client.close()
+        server.close()
+        await server.wait_closed()
+
+    asyncio.run(exercise())
+
+
+def test_send_message_error_raises_protocol_response_error():
+    async def peer(writer, request):
+        writer.write(
+            encode_frame(Error(Operation.SEND_MESSAGE, ErrorCode.BUSY, "try later"))
+        )
+        await writer.drain()
+
+    async def exercise():
+        from openqsp.protocol import SendMessage
+
+        server, client, _ = await _run_interleaving_peer(peer, SendMessage)
+        try:
+            await asyncio.to_thread(
+                client.send_message, "EA3AAA", "request", created_at=801
+            )
+        except ProtocolResponseError as error:
+            assert error.response.error_code is ErrorCode.BUSY
+        else:
+            raise AssertionError("ERROR response did not raise")
         client.close()
         server.close()
         await server.wait_closed()

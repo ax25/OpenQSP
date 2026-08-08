@@ -12,7 +12,7 @@ TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import (
+from client_sim import (  # noqa: E402
     ConnectionFailed,
     DevelopmentClient,
     DevelopmentHandshakeError,
@@ -20,9 +20,8 @@ from client_sim import (
     TransportError,
     TruncatedResponseError,
 )
-from openqsp.protocol import (
-    Ack,
-    AckStatus,
+from openqsp.protocol import (  # noqa: E402
+    Stored,
     End,
     GetNewMessages,
     Message,
@@ -68,17 +67,17 @@ def _scripted_server(chunks, *, handshake=b"OK\n"):
 
 
 def test_successful_handshake_one_response_and_fragmented_reads():
-    response = encode_frame(Ack(10, AckStatus.STORED))
+    response = encode_frame(Stored())
     with _scripted_server([bytes((byte,)) for byte in response]) as port:
         result = DevelopmentClient(TcpTransport("127.0.0.1", port), "K1ABC").request(
-            SendMessage(10, 20, "N0CALL", "hello")
+            SendMessage(20, "N0CALL", "hello")
         )
-    assert result == [Ack(10, AckStatus.STORED)]
+    assert result == [Stored()]
 
 
 def test_multiple_response_frames_are_read_through_end():
     responses = [
-        Message(1, 10, 20, "K1ABC", "N0CALL", "hello"),
+        Message(1, 20, "K1ABC", "N0CALL", "hello"),
         End(Operation.GET_NEW_MESSAGES, 1, 1, False),
     ]
     with _scripted_server([b"".join(map(encode_frame, responses))]) as port:

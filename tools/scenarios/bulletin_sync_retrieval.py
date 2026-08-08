@@ -14,7 +14,6 @@ if str(TOOLS_ROOT) not in sys.path:
 from client_sim import completed_cursor  # noqa: E402
 from scenario_environment import (  # noqa: E402
     LocalScenarioEnvironment,
-    ScenarioClient,
     ScenarioEnvironment,
 )
 from openqsp.protocol import (  # noqa: E402
@@ -34,13 +33,13 @@ SOURCE = "EA9SRC"
 SYNC_LIMIT = 20
 
 BULLETIN_A = Bulletin(
-    0x4D480801, 1_786_800_001, SOURCE, "M4.8 bulletin A", "Complete body A"
+    1, 1_786_800_001, SOURCE, "M4.8 bulletin A", "Complete body A"
 )
 BULLETIN_B = Bulletin(
-    0x4D480802, 1_786_800_002, SOURCE, "M4.8 bulletin B", "Complete body B"
+    2, 1_786_800_002, SOURCE, "M4.8 bulletin B", "Complete body B"
 )
 BULLETIN_C = Bulletin(
-    0x4D480803, 1_786_800_003, SOURCE, "M4.8 bulletin C", "Complete body C"
+    3, 1_786_800_003, SOURCE, "M4.8 bulletin C", "Complete body C"
 )
 MISSING_BULLETIN_ID = 0x4D48FFFF
 
@@ -78,7 +77,7 @@ def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     if len(headers) != 2:
         raise AssertionError(f"expected two initial headers, got {initial_sync!r}")
     # Retrieval deliberately follows the identifier supplied by synchronization.
-    retrieved = client.request(GetBulletin(headers[0].bulletin_id))
+    retrieved = client.request(GetBulletin(headers[0].sequence))
 
     env.seed_bulletin(BULLETIN_C)
     incremental_sync = client.request(GetNewBulletins(initial_cursor, SYNC_LIMIT))
@@ -101,7 +100,7 @@ def _print_sync(since: int, responses: list[ProtocolObject]) -> None:
     print(f"{CLIENT} -> GET_NEW_BULLETINS since={since}")
     for response in responses:
         if isinstance(response, BulletinHeader):
-            print(f"HEADER {response.title} id={response.bulletin_id}")
+            print(f"HEADER {response.title} id={response.sequence}")
         elif isinstance(response, End):
             more = str(response.has_more).lower()
             print(
@@ -124,8 +123,8 @@ def main(argv: list[str] | None = None) -> int:
 
     bulletin = result.retrieved[0]
     assert isinstance(bulletin, Bulletin)
-    print(f"{CLIENT} -> GET_BULLETIN {bulletin.bulletin_id}")
-    print(f"BULLETIN {bulletin.bulletin_id}")
+    print(f"{CLIENT} -> GET_BULLETIN {bulletin.sequence}")
+    print(f"BULLETIN {bulletin.sequence}")
     print(f"title: {bulletin.title}")
     print(f"body: {bulletin.body}\n")
 

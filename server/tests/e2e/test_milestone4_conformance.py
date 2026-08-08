@@ -15,8 +15,7 @@ from scenario_environment import (  # noqa: E402
     ScenarioEnvironment,
 )
 from openqsp.protocol import (  # noqa: E402
-    Ack,
-    AckStatus,
+    Stored,
     Bulletin,
     BulletinHeader,
     End,
@@ -32,10 +31,10 @@ from openqsp.protocol import (  # noqa: E402
 SENDER = "EA3AAA"
 RECIPIENT = "EA3BBB"
 UNRELATED = "EA3CCC"
-MESSAGE_A = SendMessage(0x4D490001, 1_786_900_001, RECIPIENT, "M4.9 message A")
-MESSAGE_B = SendMessage(0x4D490002, 1_786_900_002, RECIPIENT, "M4.9 message B")
+MESSAGE_A = SendMessage(1_786_900_001, RECIPIENT, "M4.9 message A")
+MESSAGE_B = SendMessage(1_786_900_002, RECIPIENT, "M4.9 message B")
 BULLETIN = Bulletin(
-    0x4D490101,
+    1,
     1_786_900_003,
     "EA9SRC",
     "M4.9 node bulletin",
@@ -58,7 +57,7 @@ def run_conformance_scenario(env: ScenarioEnvironment) -> None:
     env.seed_bulletin(BULLETIN)
 
     assert sender.request(MESSAGE_A) == [
-        Ack(MESSAGE_A.message_id, AckStatus.STORED)
+        Stored()
     ]
     empty_messages = [End(Operation.GET_NEW_MESSAGES, 0, 0, False)]
     assert unrelated.request(GetNewMessages(0, SYNC_LIMIT)) == empty_messages
@@ -68,10 +67,7 @@ def run_conformance_scenario(env: ScenarioEnvironment) -> None:
     assert len(first_sync) == 2
     message_a, first_end = first_sync
     assert isinstance(message_a, Message)
-    assert message_a == Message(
-        message_a.sequence,
-        MESSAGE_A.message_id,
-        MESSAGE_A.created_at,
+    assert message_a == Message(message_a.sequence, MESSAGE_A.created_at,
         SENDER,
         RECIPIENT,
         MESSAGE_A.body,
@@ -79,11 +75,6 @@ def run_conformance_scenario(env: ScenarioEnvironment) -> None:
     assert first_end == End(Operation.GET_NEW_MESSAGES, 1, message_a.sequence, False)
     message_cursor = _cursor(first_sync, Operation.GET_NEW_MESSAGES)
     message_a_sequence = message_a.sequence
-
-    assert sender.request(MESSAGE_A) == [
-        Ack(MESSAGE_A.message_id, AckStatus.ALREADY_STORED)
-    ]
-    assert recipient.request(GetNewMessages(0, SYNC_LIMIT)) == first_sync
 
     # Restart while retaining only state available through the environment.
     del sender, recipient, unrelated, first_sync
@@ -95,13 +86,13 @@ def run_conformance_scenario(env: ScenarioEnvironment) -> None:
         End(Operation.GET_NEW_MESSAGES, 0, message_cursor, False)
     ]
     assert sender.request(MESSAGE_B) == [
-        Ack(MESSAGE_B.message_id, AckStatus.STORED)
+        Stored()
     ]
     second_sync = recipient.request(GetNewMessages(message_cursor, SYNC_LIMIT))
     assert len(second_sync) == 2
     message_b, second_end = second_sync
     assert isinstance(message_b, Message)
-    assert message_b.message_id == MESSAGE_B.message_id
+    assert message_b.sequence == 2
     assert message_b.author == SENDER
     assert message_b.sequence == message_a_sequence + 1
     assert second_end == End(Operation.GET_NEW_MESSAGES, 1, message_b.sequence, False)
@@ -112,10 +103,7 @@ def run_conformance_scenario(env: ScenarioEnvironment) -> None:
     assert len(bulletin_sync) == 2
     header, bulletin_end = bulletin_sync
     assert isinstance(header, BulletinHeader)
-    assert header == BulletinHeader(
-        header.sequence,
-        BULLETIN.bulletin_id,
-        BULLETIN.created_at,
+    assert header == BulletinHeader(header.sequence, BULLETIN.created_at,
         BULLETIN.author,
         BULLETIN.title,
     )
@@ -123,7 +111,7 @@ def run_conformance_scenario(env: ScenarioEnvironment) -> None:
         Operation.GET_NEW_BULLETINS, 1, header.sequence, False
     )
     bulletin_cursor = _cursor(bulletin_sync, Operation.GET_NEW_BULLETINS)
-    assert recipient.request(GetBulletin(header.bulletin_id)) == [BULLETIN]
+    assert recipient.request(GetBulletin(header.sequence)) == [BULLETIN]
 
     assert recipient.request(GetNewMessages(latest_message_cursor, SYNC_LIMIT)) == [
         End(Operation.GET_NEW_MESSAGES, 0, latest_message_cursor, False)
