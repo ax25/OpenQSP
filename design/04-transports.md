@@ -194,6 +194,56 @@ When both clients were connected to `T2SPAIN`, the bidirectional test succeeded 
 
 This observation **does not establish a protocol requirement that both endpoints use the same Tier-2 server**. Normal APRS-IS operation must not depend on that assumption. Cross-server propagation and the correct production server-selection strategy therefore remain an explicit item to verify before the APRS transport is considered production-ready.
 
+#### Test D — APRS message IDs and bidirectional ACK
+
+A complete APRS acknowledgement exchange was then verified over direct APRS-IS connections.
+
+The `EA3GNU` test client sent a message addressed to `OPENQSP` with APRS message ID `01`:
+
+```text
+EA3GNU>APRS,TCPIP*::OPENQSP  :HOLA OPENQSP{01
+```
+
+The `OPENQSP` process received the message and replied with the transport-level acknowledgement:
+
+```text
+OPENQSP>APOQSP,TCPIP*::EA3GNU   :ack01
+```
+
+The client received the resulting APRS-IS packet and successfully correlated the acknowledgement with its outgoing message ID `01`.
+
+The service then sent its echo response with its own APRS message ID:
+
+```text
+OPENQSP>APOQSP,TCPIP*::EA3GNU   :MESSAGE OK: HOLA OPENQSP{01
+```
+
+The client received that message, extracted its message ID, and returned the matching acknowledgement:
+
+```text
+EA3GNU>APRS,TCPIP*::OPENQSP  :ack01
+```
+
+The client-side test reported:
+
+```text
+Incoming message ACK: OK
+Echo response:        OK
+```
+
+This verifies the complete transport-level message-ID/ACK cycle in both directions:
+
+```text
+EA3GNU  -> OPENQSP : HOLA OPENQSP{01
+OPENQSP -> EA3GNU  : ack01
+OPENQSP -> EA3GNU  : MESSAGE OK: HOLA OPENQSP{01
+EA3GNU  -> OPENQSP : ack01
+```
+
+The fact that both test directions used ID `01` is not a requirement and does not imply a shared global ID space. Production code must correlate APRS message IDs with the relevant peer and pending outbound message state.
+
+This ACK is an **APRS transport-level acknowledgement**. It confirms reception of the APRS message packet and remains distinct from OpenQSP application-level acknowledgements such as `ACK_OBJECT`.
+
 #### Verified conclusions
 
 The tests establish that:
@@ -204,12 +254,14 @@ The tests establish that:
 - users can address APRS messages directly to `OPENQSP`;
 - the service can originate APRS messages with `OPENQSP` as the source;
 - bidirectional APRS messaging works without any personal server callsign appearing in the public message flow;
-- direct APRS-IS injection is sufficient for development testing without RF coverage.
+- direct APRS-IS injection is sufficient for development testing without RF coverage;
+- APRS message IDs are successfully preserved and parsed in both directions;
+- APRS transport-level acknowledgements (`ack<ID>`) work from service to user and from user to service.
 
 The following remain to be validated separately:
 
-- APRS message IDs and transport-level ACK/retry behaviour;
-- duplicate handling;
+- retry timing and retry limits when an APRS ACK is not received;
+- duplicate handling and idempotent processing after retries;
 - message size and fragmentation policy for OpenQSP frames;
 - RF -> IGate -> APRS-IS -> OpenQSP operation;
 - OpenQSP -> APRS-IS -> IGate -> RF operation;
