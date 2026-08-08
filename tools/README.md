@@ -227,6 +227,20 @@ repeating this deterministic scenario. Its output labels `Page 1`, `Page 2`,
 `Final page`, and `Empty follow-up`, and shows every `MESSAGE` sequence plus
 the terminating `END` count, cursor, and `has_more` value.
 
+The M4.8 scenario seeds deterministic public bulletins through the existing
+development-only `BulletinStore` mechanism (not a publication operation),
+synchronizes their headers, and retrieves a complete body using an identifier
+from a synchronized header. It derives both resume cursors only from completed
+`END.next_since` responses, then verifies incremental and stable empty
+synchronization plus deterministic `NOT_FOUND` retrieval:
+
+```bash
+python tools/scenarios/bulletin_sync_retrieval.py /tmp/openqsp-m4.8.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this deterministic scenario.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
