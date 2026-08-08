@@ -230,7 +230,7 @@ The reference client and scenarios are development tools, not the final user app
 
 ## 7. Milestone 5 - Internet transport
 
-**Status: M5.1 implemented (development TCP transport)**
+**Status: M5.4 implemented (TCP client and remote scenario integration)**
 
 Objective: expose the minimum node through one simple Internet transport.
 
@@ -249,7 +249,19 @@ The transport provides the core with:
 - one authenticated or development-authenticated callsign;
 - a way to return one or more response frames.
 
-`client_sim.py` should gain an Internet transport mode so the same development client can compare local-core and remote-node behaviour.
+The TCP server transport is complemented by `TcpTransport` in
+`client_sim.py`. The simulator has explicit local SQLite and remote TCP modes,
+and the same transport-neutral scenarios execute either directly against Core
+or over loopback TCP. The client uses one connection per exchange and the
+development callsign handshake remains identification only, **not production
+authentication**.
+
+Remote integration environments own the real TCP listener and test database.
+Their controlled store access supports development-only bulletin seeding, and
+their restart operation stops and reconstructs the complete TCP-visible node
+against the same SQLite file. Reconnection therefore preserves durable
+messages, sequence continuity, and synchronization cursors without treating a
+socket as OpenQSP identity.
 
 Acceptance criteria:
 
