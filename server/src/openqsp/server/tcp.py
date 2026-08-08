@@ -59,7 +59,10 @@ class TCPServer:
             self._handle_client,
             self.host,
             self.port,
-            limit=MAX_HANDSHAKE_SIZE + 1,
+            # StreamReader uses this limit to pause its transport while a
+            # readexactly() is pending too.  It must therefore accommodate a
+            # complete maximum-size Core frame, not just the handshake line.
+            limit=MAX_FRAME_SIZE,
         )
 
     async def serve_forever(self) -> None:

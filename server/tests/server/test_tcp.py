@@ -79,6 +79,34 @@ def test_complete_request_reaches_real_core_and_response_returns(tmp_path):
     asyncio.run(exercise())
 
 
+def test_maximum_size_valid_request_does_not_stall_stream_reader(tmp_path):
+    async def exercise():
+        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+            reader, writer = await _connect(server)
+            request = encode_frame(
+                SendMessage(
+                    11,
+                    21,
+                    "N0CALL123456",
+                    "x" * 208,
+                )
+            )
+
+            # Separate writes exercise StreamReader's buffering and flow
+            # control while readexactly() waits for the complete payload.
+            for offset in range(0, len(request), 16):
+                writer.write(request[offset : offset + 16])
+                await writer.drain()
+                await asyncio.sleep(0)
+
+            response = await asyncio.wait_for(_read_frame(reader), timeout=1)
+            assert decode_frame(response) == Ack(11, AckStatus.STORED)
+            writer.close()
+            await writer.wait_closed()
+
+    asyncio.run(exercise())
+
+
 def test_fragmented_frame_is_reassembled(tmp_path):
     async def exercise():
         async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
