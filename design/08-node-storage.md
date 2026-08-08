@@ -18,8 +18,7 @@ OpenQSP version 0.1 persists:
 
 - private messages;
 - public bulletins;
-- node-local synchronization sequences;
-- the minimum metadata needed for deduplication and conflict detection.
+- mailbox-local and node-local synchronization sequences.
 
 Version 0.1 does not require persistent storage for:
 
@@ -44,8 +43,6 @@ The node storage layer must provide:
 
 - durable object storage;
 - atomic acceptance of new objects;
-- idempotent duplicate handling;
-- deterministic conflict detection;
 - stable incremental synchronization;
 - persistence across clean and unclean restarts;
 - isolation from transport-specific concerns.
@@ -56,107 +53,73 @@ An object is considered accepted only after all persistent changes required for 
 
 ## 3. Stored records
 
-A minimal implementation may use three logical record sets:
+A minimal implementation may use two logical record sets:
 
-- `objects`;
 - `messages`;
 - `bulletins`.
 
-This separation is conceptual. A physical implementation may use two tables, three tables or another normalized structure, provided all invariants remain enforceable.
+This separation is conceptual. A physical implementation may use two tables or another
+normalized structure, provided all invariants remain enforceable.
 
-### 3.1 Common object record
+### 3.1 Message record
 
-Every stored object has:
-
-| Field | Meaning |
-|---|---|
-| `object_id` | Globally unique unsigned 64-bit object identifier. |
-| `object_type` | `MESSAGE` or `BULLETIN`. |
-| `author` | Normalized OpenQSP callsign. |
-| `created_at` | Object creation timestamp supplied by its creator. |
-| `accepted_at` | Node timestamp recorded when the object is durably accepted. |
-| `content_hash` | Deterministic hash of the immutable canonical object content. |
-
-`object_id` is unique across all object types within one node. A message and a bulletin cannot share the same identifier.
-
-`accepted_at` is node metadata. It is not part of the immutable content used to determine whether a retry is identical.
-
-### 3.2 Message record
-
-Each message additionally has:
+Each message has:
 
 | Field | Meaning |
 |---|---|
-| `message_sequence` | Node-local monotonic synchronization sequence. |
 | `recipient` | Normalized recipient callsign. |
+| `mailbox_sequence` | Monotonic unsigned 32-bit sequence in the recipient mailbox. |
+| `author` | Normalized authenticated author callsign. |
+| `created_at` | Creation timestamp supplied by the creator/client. |
+| `accepted_at` | Node timestamp recorded when the message is durably accepted. |
 | `body` | Complete private-message body. |
 
 A message has exactly one author and one recipient in version 0.1.
 
-The node must be able to retrieve messages by recipient and `message_sequence` efficiently.
+The persistent identity and required uniqueness constraint are
+`UNIQUE(recipient, mailbox_sequence)`. Each mailbox also maintains a persistent high-water
+sequence. The node must retrieve messages by this pair efficiently.
 
-### 3.3 Bulletin record
+### 3.2 Bulletin record
 
-Each bulletin additionally has:
+Each bulletin has:
 
 | Field | Meaning |
 |---|---|
-| `bulletin_sequence` | Node-local monotonic synchronization sequence. |
+| `sequence` | Node-local monotonic unsigned 32-bit sequence and bulletin reference. |
+| `author` | Normalized author callsign. |
+| `created_at` | Creation timestamp supplied by the creator/client. |
+| `accepted_at` | Node timestamp recorded when the bulletin is durably accepted. |
 | `title` | Mandatory bulletin title. |
 | `body` | Complete bulletin body. |
 
-The node must be able to retrieve bulletin headers and complete bulletins by `bulletin_sequence` and `object_id` efficiently.
+The node must be able to retrieve bulletin headers and complete bulletins by `sequence`
+efficiently. There is no separate bulletin identifier.
+
+`accepted_at` is server-managed persistent metadata assigned during durable acceptance. It is
+not supplied by the client, is not part of the Core wire representation, and is neither an
+application object identifier, a synchronization cursor nor a transport transaction identifier.
 
 ---
 
-## 4. Object identity and canonical content
+## 4. Persistent identity and transport state
 
-### 4.1 Global object identifier
+Messages are identified by `(recipient, mailbox_sequence)` and bulletins by their node-local
+`sequence`. Neither is globally unique across object types. Content hashes are not required
+solely to make a global identifier idempotent.
 
-`object_id` identifies immutable application content independently of transport and node-local synchronization order.
-
-Retries of one object must reuse the same `object_id` and identical canonical content.
-
-### 4.2 Canonical message content
-
-For duplicate and conflict comparison, the canonical content of a message consists of:
-
-- object type `MESSAGE`;
-- `object_id`;
-- normalized `author`;
-- normalized `recipient`;
-- `created_at`;
-- exact body bytes.
-
-### 4.3 Canonical bulletin content
-
-For duplicate and conflict comparison, the canonical content of a bulletin consists of:
-
-- object type `BULLETIN`;
-- `object_id`;
-- normalized `author`;
-- `created_at`;
-- exact title bytes;
-- exact body bytes.
-
-Node metadata such as sequence numbers and `accepted_at` must not be included in canonical object content.
-
-### 4.4 Content hash
-
-The implementation may use a cryptographic hash to accelerate comparison, but hash equality alone must not silently permit conflicting content if the implementation can compare the stored canonical fields directly.
-
-The hash algorithm is an implementation detail in version 0.1 and is not exchanged in the protocol.
+Transport retry identifiers, duplicate windows and pending peer transactions belong outside
+these records. An unreliable adapter may replay a previously obtained Core result without
+turning its transaction identifier into persistent application data.
 
 ---
 
-## 5. Node-local synchronization sequences
+## 5. Synchronization sequences
 
 ### 5.1 Independent sequence spaces
 
-The node maintains two independent unsigned 64-bit sequence spaces:
-
-- `message_sequence`;
-- `bulletin_sequence`.
+The node maintains an independent unsigned 32-bit sequence space for each recipient mailbox,
+and one node-local unsigned 32-bit bulletin sequence space.
 
 Each sequence starts at `1`.
 
@@ -164,7 +127,8 @@ Each sequence starts at `1`.
 
 ### 5.2 Assignment
 
-A new message receives the next message sequence.
+A new message receives the next sequence in its recipient's mailbox. Different mailboxes may
+therefore contain identical sequence numbers.
 
 A new bulletin receives the next bulletin sequence.
 
@@ -178,7 +142,7 @@ Sequences must:
 - never be reused;
 - remain stable for the lifetime of the stored object;
 - survive node restart;
-- remain independent of creator timestamps and object identifiers.
+- remain independent of creator timestamps and transport identifiers.
 
 Sequence gaps are valid. Clients must not assume that every integer value exists.
 
@@ -187,18 +151,18 @@ Sequence gaps are valid. Clients must not assume that every integer value exists
 `GET_NEW_MESSAGES since=S` returns messages for the authenticated recipient with:
 
 ```text
-message_sequence > S
+mailbox_sequence > S
 ```
 
-ordered by ascending `message_sequence`.
+ordered by ascending `mailbox_sequence`.
 
 `GET_NEW_BULLETINS since=S` returns bulletin headers with:
 
 ```text
-bulletin_sequence > S
+sequence > S
 ```
 
-ordered by ascending `bulletin_sequence`.
+ordered by ascending `sequence`.
 
 The operation limit is applied after filtering and ordering.
 
@@ -214,7 +178,9 @@ A client advances its local cursor only after receiving the corresponding valid 
 
 ### 5.6 Cursor beyond current state
 
-A `since` value greater than the highest sequence currently known by the node is invalid and should produce `ERROR / INVALID_CURSOR`.
+A message `since` value greater than the authenticated mailbox's high-water sequence, or a
+bulletin `since` value greater than the node's bulletin high-water sequence, is invalid and
+should produce `ERROR / INVALID_CURSOR`.
 
 This rule detects a client cursor belonging to another node, a reset node or corrupted client state instead of silently returning an empty result.
 
@@ -222,23 +188,16 @@ This rule detects a client cursor belonging to another node, a reset node or cor
 
 ## 6. Accepting a new object
 
-Object acceptance must run as one atomic transaction.
+Message acceptance must run as one atomic transaction:
 
-For a submitted object, the node performs these logical steps:
+1. Validate `created_at`, recipient and body, and obtain the author from authenticated context.
+2. Lock or otherwise serialize the recipient mailbox's high-water state.
+3. Allocate the next mailbox sequence, assign `accepted_at` and insert the complete message.
+4. Advance the mailbox high-water value and commit.
+5. Return `STORED` only after that commit.
 
-1. Validate the complete object and authenticated author.
-2. Look up `object_id` across all stored object types.
-3. If the identifier does not exist:
-   - allocate the next sequence for its type;
-   - store the common and type-specific fields;
-   - commit the transaction;
-   - return `ACK / STORED`.
-4. If the identifier exists with identical canonical content:
-   - make no persistent change;
-   - return `ACK / ALREADY_STORED`.
-5. If the identifier exists with different type or content:
-   - make no persistent change;
-   - return `ACK / CONFLICT`.
+Bulletin insertion similarly allocates its one node-local sequence, assigns `accepted_at` and
+inserts the bulletin in the same transaction.
 
 A failed transaction must not consume a sequence as a protocol-visible accepted object. An implementation may leave internal database sequence gaps after rollback, because gaps are valid, but it must never expose a partially stored object.
 
@@ -246,14 +205,14 @@ A failed transaction must not consume a sequence as a protocol-visible accepted 
 
 ## 7. Durable storage semantics
 
-The node may return `ACK / STORED` only after the storage engine confirms that the transaction is committed durably according to the configured durability mode.
+The node may return `STORED` only after the storage engine confirms that the transaction is committed durably according to the configured durability mode.
 
 At minimum, after `STORED` is returned:
 
 - the complete object must survive a normal process restart;
+- its node-assigned `accepted_at` timestamp must be persisted;
 - indexes and sequence metadata required to retrieve it must be committed;
-- the same retry must return `ALREADY_STORED`;
-- another object using the same identifier with different content must return `CONFLICT`.
+- its assigned sequence and mailbox or bulletin high-water state must remain stable.
 
 The server must not return `STORED` while the object exists only in application memory or an uncommitted transaction.
 
@@ -265,21 +224,18 @@ For the initial SQLite implementation, foreign keys and transactional journaling
 
 Storage operations must preserve these invariants under concurrent requests:
 
-- only one object may own an `object_id`;
-- only one accepted object may own a given sequence within its type;
-- duplicate submissions cannot create duplicate rows;
-- conflicting submissions cannot overwrite accepted content;
+- only one message may own a given sequence within a recipient mailbox;
+- only one bulletin may own a given node-local bulletin sequence;
 - retrieval never observes a partially accepted object.
 
 These rules must be enforced by database constraints and transactions where possible, not only by application-level prechecks.
 
 A recommended constraint set is:
 
-- unique `object_id` across all objects;
-- unique `message_sequence` among messages;
-- unique `bulletin_sequence` among bulletins;
-- non-null canonical fields;
-- object-type consistency between common and type-specific records.
+- unique `(recipient, mailbox_sequence)` among messages;
+- unique `sequence` among bulletins;
+- non-null required application fields;
+- persistent high-water state protected by the same transactions as insertion.
 
 ---
 
@@ -297,8 +253,7 @@ Message retrieval returns complete message objects. Version 0.1 has no private-m
 
 Bulletin synchronization returns:
 
-- object identifier;
-- bulletin sequence;
+- sequence;
 - author;
 - creation timestamp;
 - title.
@@ -307,11 +262,9 @@ The bulletin body is not required in the header query.
 
 ### 9.3 Complete bulletin
 
-`GET_BULLETIN` retrieves one complete bulletin by `object_id`.
+`GET_BULLETIN` retrieves one complete bulletin by `sequence`.
 
-If no bulletin with that identifier exists, the node returns `ERROR / NOT_FOUND`.
-
-If the identifier belongs to another object type, it is also treated as not being a bulletin and returns `NOT_FOUND` to this operation.
+If no bulletin with that sequence exists, the node returns `ERROR / NOT_FOUND`.
 
 ---
 
@@ -337,10 +290,10 @@ The initial implementation should not add automatic cleanup policies that are in
 After restart, the node must recover:
 
 - all committed objects;
-- their stable object identifiers;
+- their node-assigned `accepted_at` timestamps;
 - their assigned sequences;
-- enough sequence state to allocate later values without reuse;
-- deduplication and conflict behaviour.
+- each mailbox's and the bulletin stream's high-water state, sufficient to allocate later
+  values without reuse.
 
 Temporary transport state does not need to survive restart unless a transport-specific specification requires it later.
 
@@ -356,9 +309,9 @@ Schema changes must be performed through explicit, ordered migrations.
 
 A migration must preserve:
 
-- object identifiers;
-- immutable canonical content;
-- message and bulletin sequences;
+- immutable application content;
+- node-managed `accepted_at` metadata;
+- mailbox and bulletin sequences;
 - uniqueness constraints;
 - accepted object visibility.
 
@@ -371,23 +324,23 @@ Destructive automatic schema recreation is not acceptable for a persistent node 
 The server core should depend on a storage interface equivalent to these logical operations:
 
 ```text
-store_message(authenticated_author, message)
-    -> STORED | ALREADY_STORED | CONFLICT
+store_message(authenticated_author, created_at, recipient, body)
+    -> STORED
 
 get_new_messages(recipient, since, max)
     -> ordered messages, next_since, has_more
 
 store_bulletin(authenticated_author, bulletin)
-    -> STORED | ALREADY_STORED | CONFLICT
+    -> STORED
 
 get_new_bulletin_headers(since, max)
     -> ordered headers, next_since, has_more
 
-get_bulletin(object_id)
+get_bulletin(sequence)
     -> bulletin | NOT_FOUND
 
-get_sequence_state()
-    -> highest message sequence, highest bulletin sequence
+get_sequence_state(recipient)
+    -> mailbox high-water sequence, bulletin high-water sequence
 ```
 
 `store_bulletin` is included in the storage boundary even though version 0.1 has not yet assigned a client protocol operation for bulletin publication. It may initially be used by an administrative tool or test fixture.
@@ -400,21 +353,19 @@ The storage interface must not accept transport addresses, sockets, APRS paths o
 
 A storage implementation is ready for use by the minimal server when automated tests demonstrate that:
 
-1. A new message is stored with sequence `1` in an empty database.
-2. A second message receives a greater message sequence.
-3. Bulletin sequences are independent from message sequences.
-4. An identical retry returns `ALREADY_STORED` without allocating another sequence.
-5. The same identifier with different content returns `CONFLICT`.
-6. The same identifier cannot be used by both a message and a bulletin.
-7. A recipient retrieves only its own messages.
-8. Retrieval is ordered by sequence and respects `since` and `max`.
-9. `next_since` and `has_more` are correct for empty, partial and complete pages.
-10. A cursor above the current sequence returns `INVALID_CURSOR`.
-11. A bulletin header excludes the body and a complete lookup includes it.
-12. An unknown bulletin identifier returns `NOT_FOUND`.
-13. Committed objects and sequence allocation survive restart.
-14. A failed transaction exposes no partial object.
-15. Concurrent duplicate submissions create only one stored object.
+1. A new message is stored with sequence `1` in an empty recipient mailbox.
+2. A second message in that mailbox receives a greater sequence.
+3. Different mailboxes can each contain sequence `1` and remain isolated.
+4. Bulletin sequences are independent from every mailbox sequence.
+5. A recipient retrieves only its own messages.
+6. Retrieval is ordered by sequence and respects `since` and `max`.
+7. `next_since` and `has_more` are correct for empty, partial and complete pages.
+8. A cursor above the relevant mailbox or bulletin sequence returns `INVALID_CURSOR`.
+9. A bulletin header excludes the body and a complete sequence lookup includes it.
+10. An unknown bulletin sequence returns `NOT_FOUND`.
+11. Committed objects, per-mailbox high-water values and bulletin allocation survive restart.
+12. A failed transaction exposes no partial object or protocol-visible accepted sequence.
+13. Concurrent insertions preserve uniqueness and monotonic allocation in each sequence space.
 
 ---
 

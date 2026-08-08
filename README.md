@@ -62,7 +62,12 @@ Private messages:
 - have no subject/title;
 - are stored durably by the node;
 - can be retrieved incrementally;
-- are safe to retry without creating duplicates when the same object identifier is reused with identical content.
+- are identified and synchronized by `(recipient, mailbox-local sequence)`.
+
+Each recipient has an independent sequence space for their mailbox. Reliability
+mechanisms required by an unreliable transport, including retries and
+deduplication for APRS, belong to that transport adapter rather than the Core
+application model.
 
 ## Public Bulletins
 
@@ -70,13 +75,14 @@ Public bulletin objects intended for information that should be discoverable and
 
 Bulletins include:
 
-- an identifier;
 - author callsign;
 - title;
 - body;
-- node-local synchronization sequence.
+- one node-local `u32` sequence used as both the synchronization position and
+  the bulletin reference.
 
-Clients can retrieve bulletin headers incrementally and download complete bulletins by identifier.
+Clients can retrieve bulletin headers incrementally and download complete
+bulletins by sequence. There is no separate bulletin identifier.
 
 ## Synchronization
 
@@ -88,7 +94,8 @@ The initial protocol supports:
 - `GET_NEW_MESSAGES`;
 - `GET_NEW_BULLETINS`;
 - `GET_BULLETIN`;
-- typed message, bulletin, acknowledgement, completion and error responses.
+- typed `MESSAGE` and bulletin responses, `STORED` for durable successful
+  storage, `END` for completed retrievals, and `ERROR` for failures.
 
 Features such as conversations, groups, attachments, read receipts, synchronized read state and federation are intentionally outside the v0.1 core.
 
@@ -149,7 +156,7 @@ Currently implemented:
 - automated protocol conformance tests against canonical binary examples;
 - `tools/frame_tool.py` for inspecting, validating and generating Core frames using the production codec;
 - persistent SQLite storage and the minimum `ServerCore`;
-- maintained multi-user, retry, synchronization, restart and bulletin scenarios;
+- maintained multi-user, synchronization, restart and bulletin scenarios;
 - a TCP server and remote client transport supporting all four v0.1 client
   operations through production codec, Core, and storage paths;
 - persistent mailbox and bulletin state, cursors, and sequence allocation across
@@ -221,11 +228,12 @@ complete command list.
 
 The present TCP handshake is callsign identification only, so the client does
 not ask for or transmit a password. Core v0.1 also has no capability-discovery
-operation, and the current server does not proactively push messages; the
-client's background reader is nevertheless able to receive unsolicited Core
-frames, marked with the Core `UNSOLICITED` flag, when a transport sends them.
-These are protocol/server limitations, not
-alternate client-side wire formats.
+operation, and the current server does not proactively push messages.
+`UNSOLICITED` support exists in the protocol, client, and runtime
+infrastructure: the client's background reader can receive Core frames marked
+with that flag when a transport sends them. Full production ACTIVE/INACTIVE
+presence and proactive push behaviour are not yet implemented. These are
+protocol/server limitations, not alternate client-side wire formats.
 
 ---
 

@@ -55,8 +55,8 @@ Acceptance criteria:
 - no device, conversation, read-state or federation model;
 - client/node operations defined;
 - binary layouts and operation codes defined;
-- synchronization uses node-local monotonic sequences;
-- duplicate, conflict, durability and cursor rules defined;
+- synchronization uses per-recipient mailbox and node-local bulletin sequences;
+- durable storage, transport reliability and cursor rules are separated;
 - limits and errors defined;
 - reference binary vectors available.
 
@@ -107,20 +107,21 @@ Initial implementation target:
 - SQLite;
 - explicit schema migrations;
 - transactional writes;
-- separate message and bulletin sequence spaces;
+- separate sequence space per recipient mailbox and one node-local bulletin sequence space;
 - indexes for mailbox and bulletin retrieval.
 
-Development scenarios should begin exercising storage behaviour directly, including duplicate submissions, conflicts, cursor progression and restart persistence.
+Development scenarios should exercise storage behaviour directly, including per-mailbox
+allocation, cursor progression, concurrency and restart persistence. Duplicate suppression and
+retry transactions for unreliable links belong to transport-specific scenarios.
 
 Acceptance criteria:
 
 - a new message is stored atomically and receives a stable sequence;
-- identical retries return `ALREADY_STORED` without creating duplicates;
-- identifier reuse with different content returns `CONFLICT`;
-- object identifiers are unique across all object types;
+- different mailboxes may contain the same sequence number;
+- message insertion and recipient-mailbox sequence allocation are atomic;
 - messages can be retrieved by recipient and `since` cursor;
 - bulletin headers can be retrieved incrementally;
-- complete bulletins can be retrieved by identifier;
+- complete bulletins can be retrieved by their node-local sequence;
 - data and sequence state survive process restart;
 - cursor and pagination behaviour matches `03-protocol.md` and `08-node-storage.md`;
 - automated tests cover rollback and restart scenarios;
@@ -156,7 +157,7 @@ Acceptance criteria:
 
 - the authenticated callsign is used as message author;
 - the client cannot inject a different author;
-- every supported request produces the correct `ACK`, object frames, `END` or `ERROR` response;
+- every supported request produces the correct `STORED`, object frames, `END` or `ERROR` response;
 - one user cannot retrieve another user's private messages;
 - partial multi-item responses never advance a client cursor without `END`;
 - malformed frames do not crash or corrupt the node;
@@ -175,28 +176,29 @@ Completion of this milestone defines the first functioning OpenQSP node core.
 M4.1 provides the first required scenario: two authenticated test users
 exchange one private message through the production codec, server core, and
 persistent store, with automated checks for mailbox isolation. M4.2 adds the
-identical-message retry after a lost application acknowledgement and verifies
-that it creates neither a duplicate nor a sequence gap. M4.3 demonstrates that
-reusing a stored message identifier with a changed body returns `CONFLICT`,
-leaves the original intact, and consumes no sequence. M4.4 implements
+identical-message retry after a lost application acknowledgement under the
+then-current design. That Core-level retry behaviour and M4.3's old identifier-collision scenario
+are superseded by the target architecture: unreliable transports own transaction replay and
+duplicate suppression, while Core assigns mailbox sequences. M4.4 implements
 incremental mailbox synchronization with response-derived cursors, mailbox
 isolation, suppression of previously delivered messages, and a final empty
 synchronization. M4.5 adds an isolated empty-mailbox synchronization scenario
 covering both `since=0` and a completed cursor, including cursor stability in
 the presence of unrelated mailbox activity.
 M4.6 adds mailbox pagination with a page size of two, response-derived
-`END.next_since` cursors, explicit `has_more` transitions, interleaved global
-message sequences, and checks for ordering, isolation, duplicates, and loss.
+`END.next_since` cursors and explicit `has_more` transitions. Activity is interleaved across
+independent recipient mailboxes while checks preserve mailbox isolation, per-mailbox monotonic
+ordering, correct cursor progression, pagination, and no loss.
 M4.7 implements node-restart recovery by reconstructing the complete local
 node over the same SQLite file. It verifies durable private messages and
 sequence allocation, continued use of a pre-restart `END.next_since` cursor,
 duplicate-free incremental synchronization, and unchanged mailbox isolation
 through the production client, codec, and server stack. M4.8 adds
 development-seeded public bulletin header synchronization, response-derived
-cursors, complete bulletin retrieval by synchronized identifier, incremental
+cursors, complete bulletin retrieval by synchronized sequence, incremental
 and empty follow-ups, and missing-bulletin handling. M4.9 closes the milestone
 with one integrated conformance workflow across authenticated messaging,
-isolation, retry idempotency, restart persistence, cursor resumption, sequence
+isolation, restart persistence, cursor resumption, sequence
 continuity, bulletin synchronization and full retrieval through the production
 codec, `ServerCore`, and persistent stores. Detailed behaviour remains covered
 by the individual M4.1-M4.8 scenarios.
@@ -206,8 +208,8 @@ Objective: prove the complete version 0.1 workflow with repeatable local scenari
 Required scenarios include at least:
 
 - two users exchanging a private message;
-- identical message retry after a lost application acknowledgement;
-- conflicting reuse of an object identifier;
+- unreliable-transport retry after a lost transport acknowledgement;
+- peer-scoped duplicate suppression and replay of a prior Core result;
 - incremental mailbox synchronization;
 - empty mailbox synchronization;
 - pagination and `has_more`;
@@ -217,7 +219,7 @@ Required scenarios include at least:
 Acceptance criteria:
 
 - two test users can exchange private messages through one node;
-- a sender can safely retry after losing an acknowledgement;
+- an unreliable transport can safely retry after losing its transport acknowledgement;
 - the recipient can synchronize messages incrementally;
 - bulletin headers and complete bulletins can be retrieved;
 - synchronization resumes correctly after client and node restarts;
@@ -412,7 +414,7 @@ It must demonstrate that:
 A real APRS adapter, graphical application and production authentication are not required for this first release.
 
 The completed release includes the protocol codec, persistent store, minimum
-server core, multi-user end-to-end workflows, retry idempotency,
+server core, multi-user end-to-end workflows, synchronization reliability,
 synchronization, restart persistence, bulletin retrieval, and the development
 TCP Internet transport. It intentionally has no APRS transport,
 production-grade authentication, or final user application; those belong to

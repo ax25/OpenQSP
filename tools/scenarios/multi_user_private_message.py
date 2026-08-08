@@ -13,11 +13,10 @@ if str(TOOLS_ROOT) not in sys.path:
 
 from scenario_environment import (  # noqa: E402
     LocalScenarioEnvironment,
-    ScenarioClient,
     ScenarioEnvironment,
 )
 from openqsp.protocol import (  # noqa: E402
-    Ack,
+    Stored,
     End,
     GetNewMessages,
     Message,
@@ -50,7 +49,7 @@ def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     recipient = env.client(RECIPIENT)
     third_user = env.client(THIRD_USER)
 
-    send = sender.request(SendMessage(MESSAGE_ID, CREATED_AT, RECIPIENT, BODY))
+    send = sender.request(SendMessage(CREATED_AT, RECIPIENT, BODY))
     recipient_mailbox = recipient.request(GetNewMessages(0, 20))
     sender_mailbox = sender.request(GetNewMessages(0, 20))
     third_user_mailbox = third_user.request(GetNewMessages(0, 20))
@@ -58,11 +57,11 @@ def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
 
 
 def _describe(response: ProtocolObject) -> str:
-    if isinstance(response, Ack):
-        return f"ACK id={response.object_id} status={response.status.name}"
+    if isinstance(response, Stored):
+        return f"ACK id={response.sequence} status={response.status.name}"
     if isinstance(response, Message):
         return (
-            f"MESSAGE sequence={response.sequence} id={response.message_id} "
+            f"MESSAGE sequence={response.sequence} id={response.sequence} "
             f"author={response.author} recipient={response.recipient} "
             f"body={response.body!r}"
         )

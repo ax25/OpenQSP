@@ -1,6 +1,4 @@
-"""Tests for incremental private-message retrieval."""
-
-from __future__ import annotations
+"""Tests for mailbox-local private-message retrieval."""
 
 import pytest
 
@@ -10,186 +8,174 @@ from openqsp.storage import (
     MessageStore,
     StorageIntegrityError,
 )
-from openqsp.storage.migrations import encode_u64
 
 
-@pytest.fixture
-def database(tmp_path) -> Database:
-    database = Database(tmp_path / "node.db")
+def create_store(path):
+    database = Database(path)
     database.initialize()
-    return database
+    return database, MessageStore(database, clock=lambda: 900)
 
 
-def _store(database: Database, recipients: list[str]) -> MessageStore:
-    store = MessageStore(database, clock=lambda: 1_000)
-    for message_id, recipient in enumerate(recipients, start=1):
+def add(store, recipient="BOX", count=1):
+    for number in range(1, count + 1):
         store.store_message(
-            message_id=message_id,
-            created_at=500 + message_id,
-            author="EA9SRC",
+            created_at=100 + number,
+            author="SRC",
             recipient=recipient,
-            body=f"message {message_id}",
+            body=f"body {number}",
         )
-    return store
 
 
-def _sequences(page) -> list[int]:
-    return [message.sequence for message in page.messages]
+def test_retrieval_decodes_every_stored_message_field(tmp_path):
+    _, store = create_store(tmp_path / "node.db")
+    add(store)
+    stored = store.get_new_messages(callsign="BOX", since=0, limit=1).messages[0]
+    assert stored.sequence == 1
+    assert stored.created_at == 101
+    assert stored.accepted_at == 900
+    assert stored.author == "SRC"
+    assert stored.recipient == "BOX"
+    assert stored.body == "body 1"
 
 
-def test_empty_store_and_invalid_cursor(database) -> None:
-    store = MessageStore(database)
-
-    page = store.get_new_messages(callsign="EA1ABC", since=0, limit=20)
-
-    assert page.messages == ()
-    assert (page.next_since, page.has_more) == (0, False)
-    with pytest.raises(InvalidCursorError, match="ahead"):
-        store.get_new_messages(callsign="EA1ABC", since=1, limit=20)
-
-
-def test_returns_complete_visible_message(database) -> None:
-    store = _store(database, ["EA1ABC"])
-
-    page = store.get_new_messages(callsign="EA1ABC", since=0, limit=20)
-
-    assert len(page.messages) == 1
-    message = page.messages[0]
-    assert (
-        message.sequence,
-        message.message_id,
-        message.created_at,
-        message.author,
-        message.recipient,
-        message.body,
-    ) == (1, 1, 501, "EA9SRC", "EA1ABC", "message 1")
-    assert (page.next_since, page.has_more) == (1, False)
+def test_retrieval_after_restart(tmp_path):
+    path = tmp_path / "node.db"
+    _, store = create_store(path)
+    add(store, count=2)
+    reopened = MessageStore(Database(path))
+    assert [
+        item.sequence
+        for item in reopened.get_new_messages(
+            callsign="BOX", since=0, limit=20
+        ).messages
+    ] == [1, 2]
 
 
-def test_filters_by_recipient_and_accepts_invisible_cursor(database) -> None:
-    store = _store(database, ["EA1ABC", "EA2XYZ", "EA1ABC"])
-
-    first = store.get_new_messages(callsign="EA1ABC", since=0, limit=20)
-    after_invisible = store.get_new_messages(callsign="EA1ABC", since=2, limit=20)
-
-    assert _sequences(first) == [1, 3]
-    assert _sequences(after_invisible) == [3]
-
-
-def test_paginates_visible_messages(database) -> None:
-    store = _store(database, ["EA1ABC"] * 3)
-
-    first = store.get_new_messages(callsign="EA1ABC", since=0, limit=2)
-    second = store.get_new_messages(callsign="EA1ABC", since=2, limit=2)
-
-    assert (_sequences(first), first.next_since, first.has_more) == ([1, 2], 2, True)
-    assert (_sequences(second), second.next_since, second.has_more) == ([3], 3, False)
-
-
-def test_pagination_limit_applies_after_interleaved_recipient_filter(database) -> None:
-    store = _store(
-        database, ["EA1ABC", "EA2XYZ", "EA1ABC", "EA2XYZ", "EA1ABC"]
+def test_exact_mailbox_local_pagination(tmp_path):
+    _, store = create_store(tmp_path / "node.db")
+    for number in range(1, 6):
+        store.store_message(
+            created_at=number, author="SRC", recipient="BOX", body=str(number)
+        )
+        store.store_message(
+            created_at=number, author="SRC", recipient="OTHER", body="other"
+        )
+    first = store.get_new_messages(callsign="BOX", since=0, limit=2)
+    second = store.get_new_messages(callsign="BOX", since=2, limit=2)
+    third = store.get_new_messages(callsign="BOX", since=4, limit=2)
+    assert ([m.sequence for m in first.messages], first.next_since, first.has_more) == (
+        [1, 2],
+        2,
+        True,
     )
-
-    first = store.get_new_messages(callsign="EA1ABC", since=0, limit=2)
-    second = store.get_new_messages(callsign="EA1ABC", since=3, limit=2)
-
-    assert (_sequences(first), first.next_since, first.has_more) == ([1, 3], 3, True)
-    assert (_sequences(second), second.next_since, second.has_more) == ([5], 5, False)
-
-
-def test_empty_page_preserves_valid_requested_cursor(database) -> None:
-    store = _store(database, ["EA2XYZ"] * 10)
-
-    page = store.get_new_messages(callsign="EA1ABC", since=8, limit=20)
-    at_highest = store.get_new_messages(callsign="EA1ABC", since=10, limit=20)
-
-    assert (page.messages, page.next_since, page.has_more) == ((), 8, False)
-    assert (at_highest.messages, at_highest.next_since, at_highest.has_more) == (
-        (),
-        10,
+    assert (
+        [m.sequence for m in second.messages],
+        second.next_since,
+        second.has_more,
+    ) == ([3, 4], 4, True)
+    assert ([m.sequence for m in third.messages], third.next_since, third.has_more) == (
+        [5],
+        5,
         False,
     )
+
+
+def test_empty_page_keeps_original_cursor(tmp_path):
+    _, store = create_store(tmp_path / "node.db")
+    add(store, count=2)
+    page = store.get_new_messages(callsign="BOX", since=2, limit=20)
+    assert page.messages == ()
+    assert page.next_since == 2
+    assert page.has_more is False
+
+
+def test_unknown_empty_mailbox_accepts_zero_and_rejects_positive_cursor(tmp_path):
+    _, store = create_store(tmp_path / "node.db")
+    assert store.get_new_messages(callsign="UNKNOWN", since=0, limit=1).messages == ()
     with pytest.raises(InvalidCursorError):
-        store.get_new_messages(callsign="EA1ABC", since=11, limit=20)
+        store.get_new_messages(callsign="UNKNOWN", since=1, limit=1)
+
+
+def test_other_mailbox_activity_does_not_affect_cursor_validity(tmp_path):
+    _, store = create_store(tmp_path / "node.db")
+    add(store, recipient="OTHER", count=3)
+    assert store.get_new_messages(callsign="BOX", since=0, limit=20).messages == ()
+    with pytest.raises(InvalidCursorError):
+        store.get_new_messages(callsign="BOX", since=1, limit=20)
+
+
+def test_cursor_ahead_of_local_high_water_is_rejected(tmp_path):
+    _, store = create_store(tmp_path / "node.db")
+    add(store, count=2)
+    with pytest.raises(InvalidCursorError, match="ahead"):
+        store.get_new_messages(callsign="BOX", since=3, limit=20)
 
 
 @pytest.mark.parametrize("limit", [1, 20])
-def test_limit_boundaries_are_valid(database, limit) -> None:
-    page = MessageStore(database).get_new_messages(
-        callsign="EA1ABC", since=0, limit=limit
-    )
-    assert page.messages == ()
+def test_limit_boundaries_are_valid(tmp_path, limit):
+    _, store = create_store(tmp_path / f"valid-{limit}.db")
+    add(store, count=2)
+    page = store.get_new_messages(callsign="BOX", since=0, limit=limit)
+    assert len(page.messages) == min(limit, 2)
 
 
-@pytest.mark.parametrize("limit", [0, 21, True, 1.5])
-def test_invalid_limits_are_rejected(database, limit) -> None:
-    with pytest.raises(ValueError, match="limit"):
-        MessageStore(database).get_new_messages(
-            callsign="EA1ABC", since=0, limit=limit
-        )
+@pytest.mark.parametrize("limit", [0, 21, True, 1.0, "1", None])
+def test_invalid_limits_are_rejected(tmp_path, limit):
+    _, store = create_store(tmp_path / f"invalid-{limit!r}.db")
+    with pytest.raises(ValueError):
+        store.get_new_messages(callsign="BOX", since=0, limit=limit)
 
 
-@pytest.mark.parametrize("since", [-1, 2**64, True, 1.5])
-def test_since_must_be_u64(database, since) -> None:
-    with pytest.raises(ValueError, match="since"):
-        MessageStore(database).get_new_messages(
-            callsign="EA1ABC", since=since, limit=1
-        )
+@pytest.mark.parametrize("since", [-1, 0x1_0000_0000, True, 1.0, "0", None])
+def test_since_must_be_u32(tmp_path, since):
+    _, store = create_store(tmp_path / f"since-{since!r}.db")
+    with pytest.raises(ValueError):
+        store.get_new_messages(callsign="BOX", since=since, limit=1)
 
 
-def test_unsigned_blob_order_crosses_signed_integer_boundary(database) -> None:
-    low = 0x7FFF_FFFF_FFFF_FFFF
-    high = 0x8000_0000_0000_0000
+@pytest.mark.parametrize("callsign", [None, b"BOX", 1, True])
+def test_callsign_must_be_text(tmp_path, callsign):
+    _, store = create_store(tmp_path / f"callsign-{callsign!r}.db")
+    with pytest.raises(TypeError):
+        store.get_new_messages(callsign=callsign, since=0, limit=1)
+
+
+def test_invalid_utf8_persisted_body_is_reported(tmp_path):
+    database, store = create_store(tmp_path / "node.db")
+    add(store)
     with database.connect() as connection:
-        connection.execute("BEGIN")
-        for sequence, message_id in [(low, 1), (high, 2)]:
-            encoded_id = encode_u64(message_id)
-            connection.execute(
-                "INSERT INTO objects VALUES (?, 'message')", (encoded_id,)
-            )
-            connection.execute(
-                """INSERT INTO messages VALUES (?, ?, 1, 1, 'EA9SRC',
-                                                  'EA1ABC', ?, X'00')""",
-                (encode_u64(sequence), encoded_id, f"body {message_id}".encode()),
-            )
-        connection.execute(
-            "UPDATE sequences SET last_value = ? WHERE stream = 'messages'",
-            (encode_u64(high),),
-        )
-        connection.commit()
-
-    page = MessageStore(database).get_new_messages(
-        callsign="EA1ABC", since=low - 1, limit=20
-    )
-
-    assert _sequences(page) == [low, high]
-    assert page.next_since == high
-
-
-def test_retrieval_survives_database_restart(tmp_path) -> None:
-    path = tmp_path / "restart.db"
-    database = Database(path)
-    database.initialize()
-    expected = _store(database, ["EA1ABC", "EA1ABC"]).get_new_messages(
-        callsign="EA1ABC", since=0, limit=20
-    )
-
-    reopened = Database(path)
-    reopened.initialize()
-    actual = MessageStore(reopened).get_new_messages(
-        callsign="EA1ABC", since=0, limit=20
-    )
-
-    assert actual == expected
-
-
-def test_corrupt_utf8_body_raises_integrity_error(database) -> None:
-    _store(database, ["EA1ABC"])
-    with database.connect() as connection:
-        connection.execute("UPDATE messages SET body = X'FF'")
-
+        connection.execute("UPDATE messages SET body=X'FF'")
     with pytest.raises(StorageIntegrityError, match="UTF-8"):
-        MessageStore(database).get_new_messages(
-            callsign="EA1ABC", since=0, limit=20
+        store.get_new_messages(callsign="BOX", since=0, limit=1)
+
+
+def test_messages_without_mailbox_state_are_detected(tmp_path):
+    database, store = create_store(tmp_path / "node.db")
+    add(store)
+    with database.connect() as connection:
+        connection.execute("DELETE FROM mailbox_sequences WHERE recipient='BOX'")
+    with pytest.raises(StorageIntegrityError, match="no sequence state"):
+        store.get_new_messages(callsign="BOX", since=0, limit=1)
+
+
+def test_high_water_behind_persisted_message_is_detected(tmp_path):
+    database, store = create_store(tmp_path / "node.db")
+    add(store, count=2)
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE mailbox_sequences SET last_value=1 WHERE recipient='BOX'"
         )
+    with pytest.raises(StorageIntegrityError, match="behind"):
+        store.get_new_messages(callsign="BOX", since=0, limit=20)
+
+
+@pytest.mark.parametrize("corrupt", [-1, 0x1_0000_0000, "bad", b"bad"])
+def test_corrupt_mailbox_high_water_is_reported(tmp_path, corrupt):
+    database, store = create_store(tmp_path / f"corrupt-{corrupt!r}.db")
+    with database.connect() as connection:
+        connection.execute("PRAGMA ignore_check_constraints=ON")
+        connection.execute(
+            "INSERT INTO mailbox_sequences VALUES ('BOX', ?)", (corrupt,)
+        )
+    with pytest.raises(StorageIntegrityError):
+        store.get_new_messages(callsign="BOX", since=0, limit=1)

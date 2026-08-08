@@ -65,7 +65,7 @@ When the request header is sufficiently readable, the node should return an `ERR
 | `0x01` | `SEND_MESSAGE` | Submit one private message for durable storage. |
 | `0x02` | `GET_NEW_MESSAGES` | Request complete private messages after a synchronization point. |
 | `0x03` | `GET_NEW_BULLETINS` | Request bulletin headers after a synchronization point. |
-| `0x04` | `GET_BULLETIN` | Request one complete bulletin by identifier. |
+| `0x04` | `GET_BULLETIN` | Request one complete bulletin by sequence. |
 
 ### Node responses
 
@@ -75,7 +75,7 @@ When the request header is sufficiently readable, the node should return an `ERR
 | `0x41` | `BULLETIN_HEADER` | Return one bulletin header. |
 | `0x42` | `BULLETIN` | Return one complete bulletin. |
 | `0x43` | `END` | Finish a multi-item response and provide the next synchronization point. |
-| `0x44` | `ACK` | Report the durable processing result of a submitted object. |
+| `0x44` | `STORED` | Confirm that a submitted message committed durably. |
 | `0x45` | `ERROR` | Report that a request could not be completed. |
 
 Unknown operation codes must produce `ERROR / UNKNOWN_OPERATION` when a response is possible.
@@ -129,11 +129,10 @@ Message bodies, bulletin titles and bulletin bodies must not be empty in version
 
 Text is compared by exact encoded bytes after successful UTF-8 validation. Version 0.1 performs no Unicode normalization, whitespace rewriting or case folding on message or bulletin text.
 
-### 5.3 Identifiers
+### 5.3 Sequences
 
-`message_id` and `bulletin_id` must be non-zero unsigned 64-bit values.
-
-Object identifiers are unique across object types within one node, as defined in `08-node-storage.md`.
+Message mailbox sequences and bulletin sequences are non-zero unsigned 32-bit values.
+They are scoped as described in section 6 and are assigned by the node, not the client.
 
 ### 5.4 Timestamps
 
@@ -155,24 +154,23 @@ The author of a submitted message is taken exclusively from this context. An app
 
 ---
 
-## 6. Identifiers and synchronization sequences
+## 6. Persistent references and synchronization sequences
 
-### 6.1 Object identifiers
+### 6.1 Message mailbox sequences
 
-Messages and bulletins use client-generated or publisher-generated unsigned 64-bit object identifiers.
+The node assigns each accepted message the next unsigned 32-bit sequence in the recipient's
+mailbox. A message is identified by `(recipient, sequence)`. The authenticated mailbox is
+therefore part of the meaning of both a message sequence and a message synchronization cursor.
+Different mailboxes may contain the same sequence number.
 
-An object identifier remains stable across retries and transports. Reusing an existing identifier with different immutable content is a conflict.
+### 6.2 Bulletin sequences
 
-### 6.2 Node sequences
+The node assigns bulletins from one node-local monotonically increasing unsigned 32-bit
+sequence space. This single value is both the synchronization position and the persistent
+bulletin reference.
 
-For incremental retrieval, a node assigns independent monotonically increasing unsigned 64-bit sequences to:
-
-- the node's private-message stream;
-- the node's public bulletin stream.
-
-A sequence is a node-local synchronization cursor. It is not the object identifier and is not required to be globally unique.
-
-In a request, `since = 0` means that the client has no previous synchronization point. A node returns visible objects whose sequence is greater than `since`.
+In a request, the unsigned 32-bit value `since = 0` means that the client has no previous
+synchronization point. A node returns visible objects whose sequence is greater than `since`.
 
 The exact storage, filtering and cursor rules are defined in `08-node-storage.md`.
 
@@ -186,26 +184,28 @@ Payload:
 
 | Order | Size | Field |
 |------:|-----:|-------|
-| 1 | 8 | `message_id` |
-| 2 | 4 | `created_at` |
-| 3 | 1 | `recipient_length` |
-| 4 | variable | `recipient` |
-| 5 | 1 | `body_length` |
-| 6 | variable | `body` |
+| 1 | 4 | `created_at` |
+| 2 | 1 | `recipient_length` |
+| 3 | variable | `recipient` |
+| 4 | 1 | `body_length` |
+| 5 | variable | `body` |
 
 The message author is the authenticated or transport-verified OpenQSP user. The client must not supply a separate author field.
 
 Validation requirements:
 
-- `message_id` is non-zero;
 - `created_at` is non-zero;
 - `recipient` is a valid normalized callsign;
 - `body` is valid UTF-8 between 1 and 208 bytes;
 - the payload contains no additional bytes.
 
-The sender must persist the message before first transmission. Every retry must reuse the same `message_id`, recipient, timestamp and body.
+`SEND_MESSAGE` contains neither an author nor a transport transaction identifier. The author
+comes only from authenticated or verified context. The node atomically stores the message and
+assigns the next sequence in the recipient mailbox. Invalid, rejected or failed requests use
+the normal `ERROR` operation.
 
-If the node can recover `message_id`, object validation and storage results use `ACK`. A frame too malformed to recover the identifier uses `ERROR` when a response is possible.
+Removing the former 8-byte client-generated identifier saves 8 payload bytes from every
+`SEND_MESSAGE` request.
 
 ---
 
@@ -217,10 +217,10 @@ Payload:
 
 | Order | Size | Field |
 |------:|-----:|-------|
-| 1 | 8 | `since` |
+| 1 | 4 | `since` |
 | 2 | 1 | `max` |
 
-The payload length must be exactly 9 bytes.
+The payload length must be exactly 5 bytes, saving 4 bytes from the former 64-bit cursor layout.
 
 `max` must be between `1` and `20`. The node may return fewer items because of availability, policy or transport limits.
 
@@ -238,24 +238,25 @@ Payload:
 
 | Order | Size | Field |
 |------:|-----:|-------|
-| 1 | 8 | `sequence` |
-| 2 | 8 | `message_id` |
-| 3 | 4 | `created_at` |
-| 4 | 1 | `author_length` |
-| 5 | variable | `author` |
-| 6 | 1 | `recipient_length` |
-| 7 | variable | `recipient` |
-| 8 | 1 | `body_length` |
-| 9 | variable | `body` |
+| 1 | 4 | `sequence` |
+| 2 | 4 | `created_at` |
+| 3 | 1 | `author_length` |
+| 4 | variable | `author` |
+| 5 | 1 | `recipient_length` |
+| 6 | variable | `recipient` |
+| 7 | 1 | `body_length` |
+| 8 | variable | `body` |
 
 Validation requirements:
 
-- `sequence`, `message_id` and `created_at` are non-zero;
+- `sequence` and `created_at` are non-zero;
 - `author` and `recipient` are valid normalized callsigns;
 - `body` is valid UTF-8 between 1 and 208 bytes;
 - the payload contains no additional bytes.
 
 Private messages have no title, subject, conversation identifier or thread identifier.
+Compared with the former 64-bit sequence plus 64-bit identifier layout, this saves 12 bytes
+from every `MESSAGE` payload.
 
 Receiving a `MESSAGE` does not mean that the user has read it. Read receipts and synchronized read state are outside version 0.1.
 
@@ -275,10 +276,10 @@ Payload:
 
 | Order | Size | Field |
 |------:|-----:|-------|
-| 1 | 8 | `since` |
+| 1 | 4 | `since` |
 | 2 | 1 | `max` |
 
-The payload length must be exactly 9 bytes.
+The payload length must be exactly 5 bytes, saving 4 bytes from the former 64-bit cursor layout.
 
 `max` must be between `1` and `20`.
 
@@ -296,22 +297,22 @@ Payload:
 
 | Order | Size | Field |
 |------:|-----:|-------|
-| 1 | 8 | `sequence` |
-| 2 | 8 | `bulletin_id` |
-| 3 | 4 | `created_at` |
-| 4 | 1 | `author_length` |
-| 5 | variable | `author` |
-| 6 | 1 | `title_length` |
-| 7 | variable | `title` |
+| 1 | 4 | `sequence` |
+| 2 | 4 | `created_at` |
+| 3 | 1 | `author_length` |
+| 4 | variable | `author` |
+| 5 | 1 | `title_length` |
+| 6 | variable | `title` |
 
 Validation requirements:
 
-- `sequence`, `bulletin_id` and `created_at` are non-zero;
+- `sequence` and `created_at` are non-zero;
 - `author` is a valid normalized callsign;
 - `title` is valid UTF-8 between 1 and 64 bytes;
 - the payload contains no additional bytes.
 
-The title is mandatory because an identifier alone is not useful to the user.
+The title is mandatory because a sequence alone is not useful to the user. Using one 32-bit
+sequence instead of separate 64-bit sequence and identifier fields saves 12 payload bytes.
 
 The same frame may be sent proactively while transport policy considers the
 user active. A proactive frame sets the common-header `UNSOLICITED` flag
@@ -327,9 +328,10 @@ Payload:
 
 | Order | Size | Field |
 |------:|-----:|-------|
-| 1 | 8 | `bulletin_id` |
+| 1 | 4 | `sequence` |
 
-The payload length must be exactly 8 bytes and `bulletin_id` must be non-zero.
+The payload length must be exactly 4 bytes and `sequence` must be non-zero. This saves 4 bytes
+from the former 64-bit bulletin-reference layout.
 
 The node responds with one `BULLETIN` frame or one `ERROR` frame. This operation does not use `END`.
 
@@ -343,7 +345,7 @@ Payload:
 
 | Order | Size | Field |
 |------:|-----:|-------|
-| 1 | 8 | `bulletin_id` |
+| 1 | 4 | `sequence` |
 | 2 | 4 | `created_at` |
 | 3 | 1 | `author_length` |
 | 4 | variable | `author` |
@@ -354,13 +356,14 @@ Payload:
 
 Validation requirements:
 
-- `bulletin_id` and `created_at` are non-zero;
+- `sequence` and `created_at` are non-zero;
 - `author` is a valid normalized callsign;
 - `title` is valid UTF-8 between 1 and 64 bytes;
 - `body` is valid UTF-8 between 1 and 164 bytes;
 - the payload contains no additional bytes.
 
 A bulletin has no recipient. Its title is mandatory.
+Replacing the former 64-bit identifier with the 32-bit bulletin sequence saves 4 payload bytes.
 
 ---
 
@@ -374,10 +377,10 @@ Payload:
 |------:|-----:|-------|
 | 1 | 1 | `request_operation` |
 | 2 | 1 | `returned_count` |
-| 3 | 8 | `next_since` |
+| 3 | 4 | `next_since` |
 | 4 | 1 | `has_more` |
 
-The payload length must be exactly 11 bytes.
+The payload length must be exactly 7 bytes, saving 4 bytes from the former 64-bit cursor layout.
 
 Validation requirements:
 
@@ -398,49 +401,23 @@ A client must only advance its stored synchronization point after receiving and 
 
 ---
 
-## 15. ACK
+## 15. STORED
 
-`ACK` reports the durable processing result of `SEND_MESSAGE`.
+`STORED` is the payload-free durable application result for `SEND_MESSAGE`. It means that the
+operation committed durably, including mailbox-sequence allocation and message insertion.
+It carries no message identifier. A node must not return it before the transaction defined in
+`08-node-storage.md` has committed durably.
 
-It is an application acknowledgement, not a transport acknowledgement.
-
-Payload:
-
-| Order | Size | Field |
-|------:|-----:|-------|
-| 1 | 8 | `object_id` |
-| 2 | 1 | `status` |
-
-The payload length must be exactly 9 bytes and `object_id` must be non-zero.
-
-Status codes:
-
-| Code | Name | Meaning |
-|-----:|------|---------|
-| `0x00` | `STORED` | The object was durably stored. |
-| `0x01` | `ALREADY_STORED` | The identical object was already stored. |
-| `0x02` | `REJECTED` | The object was structurally valid but refused by node policy. |
-| `0x03` | `INVALID` | The object fields or content failed validation. |
-| `0x04` | `CONFLICT` | The identifier already exists with a different object type or immutable content. |
-
-Only `STORED` and `ALREADY_STORED` complete successful submission.
-
-A node must not return `STORED` before the transaction defined in `08-node-storage.md` has committed durably.
-
-### 15.1 ACK versus ERROR
-
-For `SEND_MESSAGE`:
-
-- use `ACK / INVALID` when `message_id` was parsed but another object field is invalid;
-- use `ACK / REJECTED` when the complete object is valid but policy refuses it;
-- use `ACK / CONFLICT` when the identifier collides with different immutable content;
-- use `ERROR` when the frame cannot be parsed sufficiently to identify the object or when request processing fails outside object acceptance.
+Failures, including validation and policy rejection, use the normal `ERROR` operation. OpenQSP
+`STORED` is an application/database result. An APRS `ack<ID>` is a transport acknowledgement of
+packet reception; neither result substitutes for the other. The zero-byte `STORED` payload saves
+9 bytes compared with the former identifier-and-status acknowledgement payload.
 
 ---
 
 ## 16. ERROR
 
-`ERROR` reports failure of a request that is not represented by an object-processing `ACK`.
+`ERROR` reports that a request could not be completed.
 
 Payload:
 
@@ -469,13 +446,14 @@ Error codes:
 | `0x08` | `TOO_LARGE` | A declared or decoded field exceeds a version 0.1 limit. |
 | `0x09` | `BUSY` | The node cannot process the request temporarily. |
 | `0x0A` | `INTERNAL_ERROR` | The node failed while processing an otherwise valid request. |
+| `0x0B` | `REJECTED` | The request is valid but refused by node policy. |
 
 Examples:
 
-- unknown bulletin identifier: `ERROR / NOT_FOUND`;
+- unknown bulletin sequence: `ERROR / NOT_FOUND`;
 - `max = 0`: `ERROR / INVALID_FIELD`;
 - `since` beyond the current sequence: `ERROR / INVALID_CURSOR`;
-- body length above 208 bytes: `ACK / INVALID` when `message_id` is available, otherwise `ERROR / TOO_LARGE`;
+- body length above 208 bytes: `ERROR / TOO_LARGE`;
 - unknown operation: `ERROR / UNKNOWN_OPERATION`.
 
 A node should avoid including sensitive internal details in `detail`.
@@ -484,7 +462,7 @@ A node should avoid including sensitive internal details in `detail`.
 
 ## 17. Error response behaviour
 
-- A rejected request produces at most one `ACK` or one `ERROR` response.
+- A rejected request produces at most one `ERROR` response.
 - A failed `GET_NEW_MESSAGES` or `GET_NEW_BULLETINS` request must not be followed by `END`.
 - If failure occurs after one or more item frames but before `END`, the client must discard that incomplete response and keep its previous cursor.
 - `INTERNAL_ERROR` must not expose stack traces, database paths or credentials.
@@ -494,11 +472,12 @@ A node should avoid including sensitive internal details in `detail`.
 
 ## 18. Reliability and idempotency
 
-- Clients must persist submitted messages before transmission.
-- Retries must reuse the original identifier and exact immutable content.
-- Nodes must process duplicate submissions idempotently.
-- An identifier reused with different content must produce `ACK / CONFLICT`.
-- Transport acknowledgements do not replace `ACK / STORED` or `ACK / ALREADY_STORED`.
+- Core does not require a global object identifier for retransmission or duplicate suppression.
+- A reliable ordered transport such as TCP or WebSocket needs no additional Core retry identity.
+- Unreliable transports may maintain peer-scoped transaction identifiers, retries, duplicate
+  suppression and replay of a prior Core result entirely within the transport adapter.
+- Transport transaction identifiers must never become persistent `Message` or `Bulletin` fields.
+- Transport acknowledgements do not replace OpenQSP `STORED`, and `STORED` does not replace them.
 - A client must not advance an incremental synchronization point until the matching `END` frame has been received and validated.
 - Repeating an incremental request with the same `since` value is safe and may return the same objects again.
 

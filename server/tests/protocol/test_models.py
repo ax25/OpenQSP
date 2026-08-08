@@ -18,12 +18,10 @@ from openqsp.protocol.constants import (
     MIN_MESSAGE_BODY_LENGTH,
     MIN_RETRIEVAL_MAX,
     PROTOCOL_VERSION,
-    AckStatus,
     ErrorCode,
     Operation,
 )
 from openqsp.protocol.models import (
-    Ack,
     Bulletin,
     BulletinHeader,
     End,
@@ -33,6 +31,7 @@ from openqsp.protocol.models import (
     GetNewMessages,
     Message,
     SendMessage,
+    Stored,
 )
 
 
@@ -46,18 +45,8 @@ def test_operation_codes() -> None:
         "BULLETIN_HEADER": 0x41,
         "BULLETIN": 0x42,
         "END": 0x43,
-        "ACK": 0x44,
+        "STORED": 0x44,
         "ERROR": 0x45,
-    }
-
-
-def test_ack_status_codes() -> None:
-    assert {status.name: status.value for status in AckStatus} == {
-        "STORED": 0x00,
-        "ALREADY_STORED": 0x01,
-        "REJECTED": 0x02,
-        "INVALID": 0x03,
-        "CONFLICT": 0x04,
     }
 
 
@@ -73,6 +62,7 @@ def test_error_codes() -> None:
         "TOO_LARGE": 0x08,
         "BUSY": 0x09,
         "INTERNAL_ERROR": 0x0A,
+        "REJECTED": 0x0B,
     }
 
 
@@ -90,18 +80,17 @@ def test_protocol_constants() -> None:
 
 
 MODEL_CASES = [
-    (SendMessage, (1, 2, "EA1ABC", "Hola"), ("message_id", "created_at", "recipient", "body")),
+    (SendMessage, (2, "EA1ABC", "Hola"), ("created_at", "recipient", "body")),
     (GetNewMessages, (3, 4), ("since", "max")),
     (GetNewBulletins, (5, 6), ("since", "max")),
-    (GetBulletin, (7,), ("bulletin_id",)),
-    (Message, (8, 9, 10, "EA3GNU", "EA1ABC", "Hola"), ("sequence", "message_id", "created_at", "author", "recipient", "body")),
-    (BulletinHeader, (11, 12, 13, "EA1ABC", "Test VHF"), ("sequence", "bulletin_id", "created_at", "author", "title")),
-    (Bulletin, (14, 15, "EA1ABC", "Test VHF", "Actividad domingo"), ("bulletin_id", "created_at", "author", "title", "body")),
+    (GetBulletin, (7,), ("sequence",)),
+    (Message, (8, 10, "EA3GNU", "EA1ABC", "Hola"), ("sequence", "created_at", "author", "recipient", "body")),
+    (BulletinHeader, (11, 13, "EA1ABC", "Test VHF"), ("sequence", "created_at", "author", "title")),
+    (Bulletin, (14, 15, "EA1ABC", "Test VHF", "Actividad domingo"), ("sequence", "created_at", "author", "title", "body")),
     (End, (Operation.GET_NEW_MESSAGES, 1, 16, False), ("request_operation", "returned_count", "next_since", "has_more")),
-    (Ack, (17, AckStatus.STORED), ("object_id", "status")),
+    (Stored, (), ()),
     (Error, (Operation.GET_BULLETIN, ErrorCode.NOT_FOUND, "Not found"), ("request_operation", "error_code", "detail")),
 ]
-
 
 @pytest.mark.parametrize(("model_type", "values", "field_names"), MODEL_CASES)
 def test_model_fields_construction_and_equality(model_type, values, field_names) -> None:
@@ -117,7 +106,7 @@ def test_models_are_immutable(model_type, values, field_names) -> None:
     model = model_type(*values)
 
     with pytest.raises(FrozenInstanceError):
-        setattr(model, field_names[0], values[0])
+        setattr(model, field_names[0] if field_names else "unexpected", values[0] if values else 1)
 
 
 def test_send_message_has_no_author() -> None:

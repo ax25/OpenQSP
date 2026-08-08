@@ -22,15 +22,15 @@ def _database(tmp_path, name="node.db") -> Database:
     return database
 
 
-def _store_message(store, message_id, recipient, *, author="EA9SRC"):
+def _store_message(store, sequence, recipient, *, author="EA9SRC"):
     outcome = store.store_message(
-        message_id=message_id,
-        created_at=1_000 + message_id,
+
+        created_at=1_000 + sequence,
         author=author,
         recipient=recipient,
-        body=f"body {message_id} — exact",
+        body=f"body {sequence} — exact",
     )
-    return outcome.sequence
+    return outcome
 
 
 def _responses(core, *, callsign="EA3GNU", since=0, maximum=20):
@@ -52,10 +52,7 @@ def test_single_message_maps_every_persisted_field_then_end(tmp_path):
     responses = _responses(ServerCore(message_store=store))
 
     assert responses == [
-        Message(
-            persisted.sequence,
-            persisted.message_id,
-            persisted.created_at,
+        Message(persisted.sequence, persisted.created_at,
             persisted.author,
             persisted.recipient,
             persisted.body,
@@ -67,7 +64,7 @@ def test_single_message_maps_every_persisted_field_then_end(tmp_path):
 def test_multiple_messages_preserve_ascending_storage_order(tmp_path):
     store = MessageStore(_database(tmp_path))
     sequences = [
-        _store_message(store, message_id, "EA3GNU") for message_id in (1, 2, 3)
+        _store_message(store, sequence, "EA3GNU") for sequence in (1, 2, 3)
     ]
 
     responses = _responses(ServerCore(message_store=store))
@@ -98,7 +95,7 @@ def test_authenticated_recipient_isolation_with_invisible_global_sequences(tmp_p
 def test_pagination_then_empty_page_has_no_duplicates(tmp_path):
     store = MessageStore(_database(tmp_path))
     sequences = [
-        _store_message(store, message_id, "EA3GNU") for message_id in (1, 2, 3)
+        _store_message(store, sequence, "EA3GNU") for sequence in (1, 2, 3)
     ]
     core = ServerCore(message_store=store)
 
@@ -165,7 +162,7 @@ def test_storage_integrity_failure_returns_error_without_partial_messages():
 def test_retrieval_survives_database_restart(tmp_path):
     database = _database(tmp_path, "restart.db")
     store = MessageStore(database)
-    sequences = [_store_message(store, message_id, "EA3GNU") for message_id in (1, 2)]
+    sequences = [_store_message(store, sequence, "EA3GNU") for sequence in (1, 2)]
 
     reopened = _database(tmp_path, "restart.db")
     responses = _responses(ServerCore(message_store=MessageStore(reopened)))

@@ -62,17 +62,14 @@ class LocalScenarioEnvironment:
 
     def seed_bulletin(self, bulletin: Bulletin) -> None:
         encode_frame(bulletin)
-        outcome = self._bulletins.store_bulletin(
-            bulletin_id=bulletin.bulletin_id,
+        sequence = self._bulletins.store_bulletin(
             created_at=bulletin.created_at,
             author=bulletin.author,
             title=bulletin.title,
             body=bulletin.body,
         )
-        if outcome.result.name != "STORED":
-            raise AssertionError(
-                f"could not seed bulletin {bulletin.bulletin_id}: {outcome}"
-            )
+        if sequence != bulletin.sequence:
+            raise AssertionError(f"expected bulletin sequence {bulletin.sequence}, got {sequence}")
 
     def close(self) -> None:
         self._clients.clear()
@@ -128,17 +125,14 @@ class RemoteScenarioEnvironment:
 
     def seed_bulletin(self, bulletin: Bulletin) -> None:
         encode_frame(bulletin)
-        outcome = self._bulletins.store_bulletin(
-            bulletin_id=bulletin.bulletin_id,
+        sequence = self._bulletins.store_bulletin(
             created_at=bulletin.created_at,
             author=bulletin.author,
             title=bulletin.title,
             body=bulletin.body,
         )
-        if outcome.result.name != "STORED":
-            raise AssertionError(
-                f"could not seed bulletin {bulletin.bulletin_id}: {outcome}"
-            )
+        if sequence != bulletin.sequence:
+            raise AssertionError(f"expected bulletin sequence {bulletin.sequence}, got {sequence}")
 
     def close(self) -> None:
         self._clients.clear()

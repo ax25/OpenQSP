@@ -18,8 +18,7 @@ from scenario_environment import (  # noqa: E402
     ScenarioEnvironment,
 )
 from openqsp.protocol import (  # noqa: E402
-    Ack,
-    AckStatus,
+    Stored,
     End,
     GetNewMessages,
     Message,
@@ -34,11 +33,9 @@ SYNCED_RECIPIENT = "EA3CCC"
 OTHER_RECIPIENT = "EA3ZZZ"
 SYNC_LIMIT = 20
 
-SYNCED_MESSAGE = SendMessage(
-    0x4D340501, 1_786_400_001, SYNCED_RECIPIENT, "M4.5 synchronized message"
+SYNCED_MESSAGE = SendMessage(1_786_400_001, SYNCED_RECIPIENT, "M4.5 synchronized message"
 )
-OTHER_MESSAGE = SendMessage(
-    0x4D340502, 1_786_400_002, OTHER_RECIPIENT, "M4.5 unrelated activity"
+OTHER_MESSAGE = SendMessage(1_786_400_002, OTHER_RECIPIENT, "M4.5 unrelated activity"
 )
 
 
@@ -56,10 +53,10 @@ class ScenarioResult:
 
 def _send(client: ScenarioClient, message: SendMessage) -> list[ProtocolObject]:
     responses = client.request(message)
-    expected = [Ack(message.message_id, AckStatus.STORED)]
+    expected = [Stored()]
     if responses != expected:
         raise AssertionError(
-            f"expected ACK STORED for {message.message_id}, got {responses!r}"
+            f"expected ACK STORED for {message.sequence}, got {responses!r}"
         )
     return responses
 
@@ -96,11 +93,11 @@ def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
 
 
 def _describe(response: ProtocolObject) -> str:
-    if isinstance(response, Ack):
-        return f"ACK id={response.object_id} status={response.status.name}"
+    if isinstance(response, Stored):
+        return f"ACK id={response.sequence} status={response.status.name}"
     if isinstance(response, Message):
         return (
-            f"MESSAGE sequence={response.sequence} id={response.message_id} "
+            f"MESSAGE sequence={response.sequence} id={response.sequence} "
             f"author={response.author} recipient={response.recipient} "
             f"body={response.body!r}"
         )

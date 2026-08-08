@@ -18,8 +18,7 @@ from scenario_environment import (  # noqa: E402
     ScenarioEnvironment,
 )
 from openqsp.protocol import (  # noqa: E402
-    Ack,
-    AckStatus,
+    Stored,
     End,
     GetNewMessages,
     Message,
@@ -33,13 +32,12 @@ RECIPIENT = "EA3BBB"
 OTHER_RECIPIENT = "EA3ZZZ"
 SYNC_LIMIT = 20
 
-MESSAGE_A = SendMessage(0x4D340401, 1_786_300_001, RECIPIENT, "M4.4 message A")
-OTHER_MESSAGE = SendMessage(
-    0x4D340402, 1_786_300_002, OTHER_RECIPIENT, "M4.4 isolated message"
+MESSAGE_A = SendMessage(1_786_300_001, RECIPIENT, "M4.4 message A")
+OTHER_MESSAGE = SendMessage(1_786_300_002, OTHER_RECIPIENT, "M4.4 isolated message"
 )
-MESSAGE_B = SendMessage(0x4D340403, 1_786_300_003, RECIPIENT, "M4.4 message B")
-MESSAGE_C = SendMessage(0x4D340404, 1_786_300_004, RECIPIENT, "M4.4 message C")
-MESSAGE_D = SendMessage(0x4D340405, 1_786_300_005, RECIPIENT, "M4.4 message D")
+MESSAGE_B = SendMessage(1_786_300_003, RECIPIENT, "M4.4 message B")
+MESSAGE_C = SendMessage(1_786_300_004, RECIPIENT, "M4.4 message C")
+MESSAGE_D = SendMessage(1_786_300_005, RECIPIENT, "M4.4 message D")
 
 
 @dataclass(frozen=True)
@@ -59,9 +57,9 @@ def _send(
     clients: dict[str, ScenarioClient], author: str, message: SendMessage
 ) -> list[ProtocolObject]:
     responses = clients[author].request(message)
-    expected = [Ack(message.message_id, AckStatus.STORED)]
+    expected = [Stored()]
     if responses != expected:
-        raise AssertionError(f"expected ACK STORED for {message.message_id}, got {responses!r}")
+        raise AssertionError(f"expected STORED, got {responses!r}")
     return responses
 
 
@@ -78,8 +76,7 @@ def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     clients = {callsign: env.client(callsign) for callsign in authors}
     recipient = env.client(RECIPIENT)
 
-    # The other recipient's message deliberately creates a gap in EA3BBB's
-    # visible global message sequences (A=1, isolated=2, B=3).
+    # Each recipient advances an independent mailbox-local sequence.
     initial_sends = [
         _send(clients, "EA3AAA", MESSAGE_A),
         _send(clients, "EA3AAA", OTHER_MESSAGE),
@@ -110,11 +107,11 @@ def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
 
 
 def _describe(response: ProtocolObject) -> str:
-    if isinstance(response, Ack):
-        return f"ACK id={response.object_id} status={response.status.name}"
+    if isinstance(response, Stored):
+        return "STORED"
     if isinstance(response, Message):
         return (
-            f"MESSAGE sequence={response.sequence} id={response.message_id} "
+            f"MESSAGE sequence={response.sequence} id={response.sequence} "
             f"author={response.author} recipient={response.recipient} "
             f"body={response.body!r}"
         )

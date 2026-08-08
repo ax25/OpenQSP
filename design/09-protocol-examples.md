@@ -22,8 +22,8 @@ Unless stated otherwise:
 
 | Name | Value |
 |---|---|
-| `message_id` | `0x0102030405060708` |
-| `bulletin_id` | `0x1112131415161718` |
+| Message mailbox sequence | `125` (`0x0000007D`) |
+| Bulletin sequence | `246` (`0x000000F6`) |
 | `created_at` | `0x65000000` |
 | Message author | `EA3GNU` |
 | Message recipient | `EA1ABC` |
@@ -39,17 +39,15 @@ Unless stated otherwise:
 Logical fields:
 
 ```text
-message_id = 0x0102030405060708
 created_at = 0x65000000
 recipient  = EA1ABC
 body       = Hola
 ```
 
-Payload length: `24` bytes (`0x18`).
+Payload length: `16` bytes (`0x10`).
 
 ```hex
-01 01 00 18
-01 02 03 04 05 06 07 08
+01 01 00 10
 65 00 00 00
 06 45 41 31 41 42 43
 04 48 6F 6C 61
@@ -58,44 +56,33 @@ Payload length: `24` bytes (`0x18`).
 Complete frame:
 
 ```hex
-01 01 00 18 01 02 03 04 05 06 07 08 65 00 00 00 06 45 41 31 41 42 43 04 48 6F 6C 61
+01 01 00 10 65 00 00 00 06 45 41 31 41 42 43 04 48 6F 6C 61
 ```
 
 Expected result for a new object:
 
 ```text
-ACK / STORED
+STORED
 ```
 
-Repeating the identical frame must produce:
-
-```text
-ACK / ALREADY_STORED
-```
+The byte-identical request has no Core retry identity. A reliable transport sends it once;
+an unreliable transport is responsible for suppressing duplicate transactions or replaying
+the prior result before another Core submission.
 
 ---
 
-## 3. ACK / STORED
+## 3. STORED
 
-Logical fields:
-
-```text
-object_id = 0x0102030405060708
-status    = STORED (0x00)
-```
-
-Payload length: `9` bytes (`0x09`).
+`STORED` has no payload.
 
 ```hex
-01 44 00 09
-01 02 03 04 05 06 07 08
-00
+01 44 00 00
 ```
 
 Complete frame:
 
 ```hex
-01 44 00 09 01 02 03 04 05 06 07 08 00
+01 44 00 00
 ```
 
 ---
@@ -109,18 +96,18 @@ since = 124
 max   = 5
 ```
 
-Payload length: `9` bytes (`0x09`).
+Payload length: `5` bytes (`0x05`).
 
 ```hex
-01 02 00 09
-00 00 00 00 00 00 00 7C
+01 02 00 05
+00 00 00 7C
 05
 ```
 
 Complete frame:
 
 ```hex
-01 02 00 09 00 00 00 00 00 00 00 7C 05
+01 02 00 05 00 00 00 7C 05
 ```
 
 ---
@@ -130,20 +117,18 @@ Complete frame:
 Logical fields:
 
 ```text
-sequence   = 125
-message_id = 0x0102030405060708
+sequence   = 125 (in EA1ABC's mailbox)
 created_at = 0x65000000
 author     = EA3GNU
 recipient  = EA1ABC
 body       = Hola
 ```
 
-Payload length: `39` bytes (`0x27`).
+Payload length: `27` bytes (`0x1B`).
 
 ```hex
-01 40 00 27
-00 00 00 00 00 00 00 7D
-01 02 03 04 05 06 07 08
+01 40 00 1B
+00 00 00 7D
 65 00 00 00
 06 45 41 33 47 4E 55
 06 45 41 31 41 42 43
@@ -153,7 +138,7 @@ Payload length: `39` bytes (`0x27`).
 Complete frame:
 
 ```hex
-01 40 00 27 00 00 00 00 00 00 00 7D 01 02 03 04 05 06 07 08 65 00 00 00 06 45 41 33 47 4E 55 06 45 41 31 41 42 43 04 48 6F 6C 61
+01 40 00 1B 00 00 00 7D 65 00 00 00 06 45 41 33 47 4E 55 06 45 41 31 41 42 43 04 48 6F 6C 61
 ```
 
 ---
@@ -169,20 +154,20 @@ next_since        = 125
 has_more          = false
 ```
 
-Payload length: `11` bytes (`0x0B`).
+Payload length: `7` bytes (`0x07`).
 
 ```hex
-01 43 00 0B
+01 43 00 07
 02
 01
-00 00 00 00 00 00 00 7D
+00 00 00 7D
 00
 ```
 
 Complete frame:
 
 ```hex
-01 43 00 0B 02 01 00 00 00 00 00 00 00 7D 00
+01 43 00 07 02 01 00 00 00 7D 00
 ```
 
 ---
@@ -196,18 +181,18 @@ since = 245
 max   = 5
 ```
 
-Payload length: `9` bytes (`0x09`).
+Payload length: `5` bytes (`0x05`).
 
 ```hex
-01 03 00 09
-00 00 00 00 00 00 00 F5
+01 03 00 05
+00 00 00 F5
 05
 ```
 
 Complete frame:
 
 ```hex
-01 03 00 09 00 00 00 00 00 00 00 F5 05
+01 03 00 05 00 00 00 F5 05
 ```
 
 ---
@@ -218,18 +203,16 @@ Logical fields:
 
 ```text
 sequence    = 246
-bulletin_id = 0x1112131415161718
 created_at  = 0x65000000
 author      = EA1ABC
 title       = Test VHF
 ```
 
-Payload length: `36` bytes (`0x24`).
+Payload length: `24` bytes (`0x18`).
 
 ```hex
-01 41 00 24
-00 00 00 00 00 00 00 F6
-11 12 13 14 15 16 17 18
+01 41 00 18
+00 00 00 F6
 65 00 00 00
 06 45 41 31 41 42 43
 08 54 65 73 74 20 56 48 46
@@ -238,7 +221,7 @@ Payload length: `36` bytes (`0x24`).
 Complete frame:
 
 ```hex
-01 41 00 24 00 00 00 00 00 00 00 F6 11 12 13 14 15 16 17 18 65 00 00 00 06 45 41 31 41 42 43 08 54 65 73 74 20 56 48 46
+01 41 00 18 00 00 00 F6 65 00 00 00 06 45 41 31 41 42 43 08 54 65 73 74 20 56 48 46
 ```
 
 ---
@@ -254,20 +237,20 @@ next_since        = 246
 has_more          = false
 ```
 
-Payload length: `11` bytes (`0x0B`).
+Payload length: `7` bytes (`0x07`).
 
 ```hex
-01 43 00 0B
+01 43 00 07
 03
 01
-00 00 00 00 00 00 00 F6
+00 00 00 F6
 00
 ```
 
 Complete frame:
 
 ```hex
-01 43 00 0B 03 01 00 00 00 00 00 00 00 F6 00
+01 43 00 07 03 01 00 00 00 F6 00
 ```
 
 ---
@@ -277,20 +260,20 @@ Complete frame:
 Logical fields:
 
 ```text
-bulletin_id = 0x1112131415161718
+sequence = 246
 ```
 
-Payload length: `8` bytes (`0x08`).
+Payload length: `4` bytes (`0x04`).
 
 ```hex
-01 04 00 08
-11 12 13 14 15 16 17 18
+01 04 00 04
+00 00 00 F6
 ```
 
 Complete frame:
 
 ```hex
-01 04 00 08 11 12 13 14 15 16 17 18
+01 04 00 04 00 00 00 F6
 ```
 
 ---
@@ -300,18 +283,18 @@ Complete frame:
 Logical fields:
 
 ```text
-bulletin_id = 0x1112131415161718
+sequence    = 246
 created_at  = 0x65000000
 author      = EA1ABC
 title       = Test VHF
 body        = Actividad domingo
 ```
 
-Payload length: `46` bytes (`0x2E`).
+Payload length: `42` bytes (`0x2A`).
 
 ```hex
-01 42 00 2E
-11 12 13 14 15 16 17 18
+01 42 00 2A
+00 00 00 F6
 65 00 00 00
 06 45 41 31 41 42 43
 08 54 65 73 74 20 56 48 46
@@ -321,7 +304,7 @@ Payload length: `46` bytes (`0x2E`).
 Complete frame:
 
 ```hex
-01 42 00 2E 11 12 13 14 15 16 17 18 65 00 00 00 06 45 41 31 41 42 43 08 54 65 73 74 20 56 48 46 11 41 63 74 69 76 69 64 61 64 20 64 6F 6D 69 6E 67 6F
+01 42 00 2A 00 00 00 F6 65 00 00 00 06 45 41 31 41 42 43 08 54 65 73 74 20 56 48 46 11 41 63 74 69 76 69 64 61 64 20 64 6F 6D 69 6E 67 6F
 ```
 
 ---
@@ -376,7 +359,7 @@ has_more          = false
 Canonical frame:
 
 ```hex
-01 43 00 0B 02 00 00 00 00 00 00 00 00 7D 00
+01 43 00 07 02 00 00 00 00 7D 00
 ```
 
 ---
@@ -421,7 +404,7 @@ The following vectors are intentionally invalid and should be used as negative p
 ### 15.1 Unsupported version
 
 ```hex
-02 04 00 08 11 12 13 14 15 16 17 18
+02 04 00 04 00 00 00 F6
 ```
 
 Expected result when a response is possible:
@@ -433,7 +416,7 @@ ERROR / UNSUPPORTED_VERSION
 ### 15.2 Non-zero flags
 
 ```hex
-01 04 01 08 11 12 13 14 15 16 17 18
+01 04 01 04 00 00 00 F6
 ```
 
 Expected result:
@@ -449,7 +432,7 @@ The frame remains invalid because `UNSOLICITED` is not permitted on
 ### 15.3 Declared payload longer than actual payload
 
 ```hex
-01 04 00 08 11 12 13 14
+01 04 00 04 00 00
 ```
 
 Expected result:
@@ -463,7 +446,7 @@ A transport may discard the data silently if the request cannot be identified re
 ### 15.4 Trailing byte beyond declared payload
 
 ```hex
-01 04 00 08 11 12 13 14 15 16 17 18 FF
+01 04 00 04 00 00 00 F6 FF
 ```
 
 Expected result:
@@ -475,7 +458,7 @@ ERROR / INVALID_FRAME
 ### 15.5 GET_NEW_MESSAGES with max zero
 
 ```hex
-01 02 00 09 00 00 00 00 00 00 00 7C 00
+01 02 00 05 00 00 00 7C 00
 ```
 
 Expected result:
@@ -484,59 +467,45 @@ Expected result:
 ERROR / INVALID_FIELD
 ```
 
-### 15.6 SEND_MESSAGE with zero message identifier
+### 15.6 SEND_MESSAGE with empty body
 
 ```hex
-01 01 00 18 00 00 00 00 00 00 00 00 65 00 00 00 06 45 41 31 41 42 43 04 48 6F 6C 61
-```
-
-The payload can be parsed sufficiently to identify the submitted object ID, but the ID is invalid.
-
-Expected result:
-
-```text
-ACK / INVALID
-```
-
-### 15.7 SEND_MESSAGE with empty body
-
-```hex
-01 01 00 14 01 02 03 04 05 06 07 08 65 00 00 00 06 45 41 31 41 42 43 00
+01 01 00 0C 65 00 00 00 06 45 41 31 41 42 43 00
 ```
 
 Expected result:
 
 ```text
-ACK / INVALID
+ERROR / INVALID_FIELD
 ```
 
-### 15.8 SEND_MESSAGE with invalid recipient
+### 15.7 SEND_MESSAGE with invalid recipient
 
 The recipient contains a hyphenated APRS SSID and is not normalized:
 
 ```hex
-01 01 00 1B 01 02 03 04 05 06 07 08 65 00 00 00 09 45 41 31 41 42 43 2D 31 30 04 48 6F 6C 61
+01 01 00 13 65 00 00 00 09 45 41 31 41 42 43 2D 31 30 04 48 6F 6C 61
 ```
 
 Expected result:
 
 ```text
-ACK / INVALID
+ERROR / INVALID_FIELD
 ```
 
-### 15.9 Invalid UTF-8 body
+### 15.8 Invalid UTF-8 body
 
 ```hex
-01 01 00 16 01 02 03 04 05 06 07 08 65 00 00 00 06 45 41 31 41 42 43 02 C3 28
+01 01 00 0E 65 00 00 00 06 45 41 31 41 42 43 02 C3 28
 ```
 
 Expected result:
 
 ```text
-ACK / INVALID
+ERROR / INVALID_FIELD
 ```
 
-### 15.10 Unknown operation
+### 15.9 Unknown operation
 
 ```hex
 01 7F 00 00
@@ -560,7 +529,7 @@ At minimum, implementations should use these vectors to verify:
 4. Exact payload-length validation.
 5. Rejection of unknown operations and unsupported versions.
 6. Enforcement of callsign and text rules.
-7. `ACK / STORED`, `ALREADY_STORED`, `INVALID` and `CONFLICT` behaviour.
+7. Payload-free `STORED` and `SEND_MESSAGE` error behaviour.
 8. Incremental retrieval ordering.
 9. Cursor advancement only after `END`.
 10. Correct empty and paginated responses.

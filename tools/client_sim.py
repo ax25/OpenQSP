@@ -16,7 +16,6 @@ if str(SERVER_SRC) not in sys.path:
     sys.path.insert(0, str(SERVER_SRC))
 
 from openqsp.protocol import (  # noqa: E402
-    Ack,
     Bulletin,
     BulletinHeader,
     End,
@@ -28,6 +27,7 @@ from openqsp.protocol import (  # noqa: E402
     Operation,
     ProtocolObject,
     SendMessage,
+    Stored,
     decode_frame,
     encode_frame,
 )
@@ -82,7 +82,7 @@ class TcpTransport:
     """
 
     _TERMINATORS = {
-        Operation.SEND_MESSAGE: {Operation.ACK, Operation.ERROR},
+        Operation.SEND_MESSAGE: {Operation.STORED, Operation.ERROR},
         Operation.GET_NEW_MESSAGES: {Operation.END, Operation.ERROR},
         Operation.GET_NEW_BULLETINS: {Operation.END, Operation.ERROR},
         Operation.GET_BULLETIN: {Operation.BULLETIN, Operation.ERROR},
@@ -242,7 +242,6 @@ def _parser() -> argparse.ArgumentParser:
 
     send = commands.add_parser("send-message", help="submit a private message")
     send.add_argument("--to", required=True, dest="recipient")
-    send.add_argument("--id", required=True, type=parse_integer, dest="message_id")
     send.add_argument("--timestamp", required=True, type=parse_integer)
     send.add_argument("--body", required=True)
 
@@ -252,13 +251,12 @@ def _parser() -> argparse.ArgumentParser:
         retrieval.add_argument("--max", required=True, type=parse_integer)
 
     bulletin = commands.add_parser("get-bulletin")
-    bulletin.add_argument("--id", required=True, type=parse_integer, dest="bulletin_id")
+    bulletin.add_argument("--sequence", required=True, type=parse_integer)
 
     seed = commands.add_parser(
         "seed-bulletin",
         help="development-only node setup (not an OpenQSP client operation)",
     )
-    seed.add_argument("--id", required=True, type=parse_integer, dest="bulletin_id")
     seed.add_argument("--timestamp", required=True, type=parse_integer)
     seed.add_argument("--title", required=True)
     seed.add_argument("--body", required=True)
@@ -267,25 +265,22 @@ def _parser() -> argparse.ArgumentParser:
 
 def _request(args: argparse.Namespace) -> ProtocolObject:
     if args.command == "send-message":
-        return SendMessage(args.message_id, args.timestamp, args.recipient, args.body)
+        return SendMessage(args.timestamp, args.recipient, args.body)
     if args.command == "get-new-messages":
         return GetNewMessages(args.since, args.max)
     if args.command == "get-new-bulletins":
         return GetNewBulletins(args.since, args.max)
     if args.command == "get-bulletin":
-        return GetBulletin(args.bulletin_id)
+        return GetBulletin(args.sequence)
     raise ValueError(f"not a client operation: {args.command}")
 
 
 def _print_response(response: ProtocolObject) -> None:
-    if isinstance(response, Ack):
-        print("ACK")
-        print(f"  object_id: {response.object_id}")
-        print(f"  status: {response.status.name}")
+    if isinstance(response, Stored):
+        print("STORED")
     elif isinstance(response, Message):
         print("MESSAGE")
         print(f"  sequence: {response.sequence}")
-        print(f"  message_id: {response.message_id}")
         print(f"  created_at: {response.created_at}")
         print(f"  author: {response.author}")
         print(f"  recipient: {response.recipient}")
@@ -293,13 +288,12 @@ def _print_response(response: ProtocolObject) -> None:
     elif isinstance(response, BulletinHeader):
         print("BULLETIN_HEADER")
         print(f"  sequence: {response.sequence}")
-        print(f"  bulletin_id: {response.bulletin_id}")
         print(f"  created_at: {response.created_at}")
         print(f"  author: {response.author}")
         print(f"  title: {response.title}")
     elif isinstance(response, Bulletin):
         print("BULLETIN")
-        print(f"  bulletin_id: {response.bulletin_id}")
+        print(f"  sequence: {response.sequence}")
         print(f"  created_at: {response.created_at}")
         print(f"  author: {response.author}")
         print(f"  title: {response.title}")
@@ -332,23 +326,21 @@ def main(argv: list[str] | None = None) -> int:
             # This is node/test setup, deliberately separated from client
             # operations. Encoding validates fields before direct store setup.
             bulletin = Bulletin(
-                args.bulletin_id,
+                1,
                 args.timestamp,
                 args.callsign,
                 args.title,
                 args.body,
             )
             encode_frame(bulletin)
-            outcome = bulletin_store.store_bulletin(
-                bulletin_id=bulletin.bulletin_id,
+            sequence = bulletin_store.store_bulletin(
                 created_at=bulletin.created_at,
                 author=bulletin.author,
                 title=bulletin.title,
                 body=bulletin.body,
             )
             print("DEVELOPMENT SEED")
-            print(f"  object_id: {args.bulletin_id}")
-            print(f"  status: {outcome.result.name}")
+            print(f"  sequence: {sequence}")
             return 0
 
         if args.tcp_host is not None:

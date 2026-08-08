@@ -94,7 +94,8 @@ A message:
 - is immutable after creation;
 - is downloaded in full.
 
-Retries reuse the same object identifier and identical content. A correction is represented by a new message.
+The node assigns a message sequence in its recipient mailbox. A correction is represented by a
+new message; transport retries do not define persistent identity.
 
 Transport attempts, link acknowledgements, retry counters and temporary routing state are operational concerns and are not separate domain entities in version 0.1.
 
@@ -133,7 +134,7 @@ Clients and transports participate in communication but are not persistent domai
 ## 7. Domain rules
 
 - One normalized base callsign represents one OpenQSP user.
-- Objects use stable identifiers independent of transport.
+- Messages use `(recipient, mailbox sequence)` and bulletins use a node-local sequence.
 - Version 0.1 objects are `Message` and `Bulletin`.
 - Stored object content is immutable.
 - A private message belongs to the recipient user's mailbox, not to a device or transport address.
