@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Run the M4.5 empty private-mailbox synchronization scenario."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+
+TOOLS_ROOT = Path(__file__).resolve().parents[1]
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from client_sim import LocalCoreClient, completed_cursor  # noqa: E402
+from openqsp.protocol import (  # noqa: E402
+    Ack,
+    AckStatus,
+    End,
+    GetNewMessages,
+    Message,
+    Operation,
+    ProtocolObject,
+    SendMessage,
+)
+from openqsp.server import ServerCore  # noqa: E402
+from openqsp.storage import Database, MessageStore  # noqa: E402
+
+
+EMPTY_RECIPIENT = "EA3BBB"
+SYNCED_RECIPIENT = "EA3CCC"
+OTHER_RECIPIENT = "EA3ZZZ"
+SYNC_LIMIT = 20
+
+SYNCED_MESSAGE = SendMessage(
+    0x4D340501, 1_786_400_001, SYNCED_RECIPIENT, "M4.5 synchronized message"
+)
+OTHER_MESSAGE = SendMessage(
+    0x4D340502, 1_786_400_002, OTHER_RECIPIENT, "M4.5 unrelated activity"
+)
+
+
+@dataclass(frozen=True)
+class ScenarioResult:
+    """Decoded responses and the completed cursor used by M4.5."""
+
+    initial_empty_sync: list[ProtocolObject]
+    synced_send: list[ProtocolObject]
+    initial_sync: list[ProtocolObject]
+    cursor: int
+    other_send: list[ProtocolObject]
+    repeated_empty_sync: list[ProtocolObject]
+
+
+def _send(client: LocalCoreClient, message: SendMessage) -> list[ProtocolObject]:
+    responses = client.request(message)
+    expected = [Ack(message.message_id, AckStatus.STORED)]
+    if responses != expected:
+        raise AssertionError(
+            f"expected ACK STORED for {message.message_id}, got {responses!r}"
+        )
+    return responses
+
+
+def run_scenario(database_path: str | Path) -> ScenarioResult:
+    """Exercise empty synchronization through the public local Core stack."""
+    database = Database(database_path)
+    database.initialize()
+    core = ServerCore(message_store=MessageStore(database))
+
+    sender = LocalCoreClient(core, "EA3AAA")
+    empty_recipient = LocalCoreClient(core, EMPTY_RECIPIENT)
+    synced_recipient = LocalCoreClient(core, SYNCED_RECIPIENT)
+
+    initial_empty_sync = empty_recipient.request(GetNewMessages(0, SYNC_LIMIT))
+
+    synced_send = _send(sender, SYNCED_MESSAGE)
+    initial_sync = synced_recipient.request(GetNewMessages(0, SYNC_LIMIT))
+    cursor = completed_cursor(initial_sync, Operation.GET_NEW_MESSAGES)
+    if cursor is None:
+        raise AssertionError("initial synchronization did not end with a valid END")
+
+    # Advance the node's global message sequence for an unrelated mailbox.
+    # An empty EA3CCC response must nevertheless preserve EA3CCC's cursor.
+    other_send = _send(sender, OTHER_MESSAGE)
+    repeated_empty_sync = synced_recipient.request(
+        GetNewMessages(cursor, SYNC_LIMIT)
+    )
+
+    return ScenarioResult(
+        initial_empty_sync,
+        synced_send,
+        initial_sync,
+        cursor,
+        other_send,
+        repeated_empty_sync,
+    )
+
+
+def _describe(response: ProtocolObject) -> str:
+    if isinstance(response, Ack):
+        return f"ACK id={response.object_id} status={response.status.name}"
+    if isinstance(response, Message):
+        return (
+            f"MESSAGE sequence={response.sequence} id={response.message_id} "
+            f"author={response.author} recipient={response.recipient} "
+            f"body={response.body!r}"
+        )
+    if isinstance(response, End):
+        return (
+            f"END returned={response.returned_count} "
+            f"next_since={response.next_since} "
+            f"has_more={str(response.has_more).lower()}"
+        )
+    return repr(response)
+
+
+def _print_responses(label: str, responses: list[ProtocolObject]) -> None:
+    print(label)
+    for response in responses:
+        print(f"  {_describe(response)}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if len(argv) != 1:
+        print("usage: empty_mailbox_sync.py DATABASE", file=sys.stderr)
+        return 2
+
+    result = run_scenario(argv[0])
+    _print_responses("EA3BBB initial empty sync", result.initial_empty_sync)
+    _print_responses("EA3CCC message setup", result.synced_send)
+    _print_responses("EA3CCC initial sync", result.initial_sync)
+    print(f"  completed cursor={result.cursor}")
+    _print_responses("EA3ZZZ unrelated mailbox activity", result.other_send)
+    _print_responses(
+        f"EA3CCC repeated empty sync since={result.cursor}",
+        result.repeated_empty_sync,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -181,7 +181,9 @@ leaves the original intact, and consumes no sequence. The remaining Milestone
 4 scenarios and acceptance criteria are still planned. M4.4 implements
 incremental mailbox synchronization with response-derived cursors, mailbox
 isolation, suppression of previously delivered messages, and a final empty
-synchronization.
+synchronization. M4.5 adds an isolated empty-mailbox synchronization scenario
+covering both `since=0` and a completed cursor, including cursor stability in
+the presence of unrelated mailbox activity.
 
 Objective: prove the complete version 0.1 workflow with repeatable local scenarios using the reference simulator.
 
