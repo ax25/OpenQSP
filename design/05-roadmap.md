@@ -230,11 +230,20 @@ The reference client and scenarios are development tools, not the final user app
 
 ## 7. Milestone 5 - Internet transport
 
-**Status: next active milestone**
+**Status: M5.1 implemented (development TCP transport)**
 
 Objective: expose the minimum node through one simple Internet transport.
 
-The exact choice between TCP, HTTP, WebSocket or another framing method will be made when implementation begins. The transport must provide the core with:
+TCP is the first development Internet transport. Each connection begins with a
+bounded `CALLSIGN <normalized-callsign>\n` handshake. This identification is
+**development-only and is not production authentication**. After the handshake,
+the TCP adapter uses the existing Core header payload-length byte to recover
+complete frames; the OpenQSP Core frames themselves are unchanged. It forwards
+each complete request and the connection callsign directly to `ServerCore` and
+writes the returned frames in order, without inspecting operations or owning
+protocol or storage logic.
+
+The transport provides the core with:
 
 - one complete OpenQSP frame;
 - one authenticated or development-authenticated callsign;
