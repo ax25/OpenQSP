@@ -186,6 +186,19 @@ python tools/scenarios/message_id_conflict.py /tmp/openqsp-m4.3.db
 Use a new database path (or remove the previous laboratory database) before
 repeating this scenario.
 
+The M4.4 scenario interleaves messages for two mailboxes, synchronizes
+`EA3BBB`, and obtains each follow-up cursor from the preceding response's
+terminating `END`. It shows that only later messages appear in the second
+synchronization and that a third synchronization preserves the cursor while
+returning an empty `END`:
+
+```bash
+python tools/scenarios/incremental_mailbox_sync.py /tmp/openqsp-m4.4.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this deterministic scenario.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
