@@ -193,12 +193,11 @@ The two layers should share production code and canonical fixtures rather than d
 
 ## 7. Current status
 
-No development tool is implemented yet.
-
-The first implementation target is:
+The first development tool is available:
 
 ```text
 tools/frame_tool.py
 ```
 
-It will be created as part of Milestone 1 immediately after the protocol package exposes a working encoder and decoder.
+It inspects, validates and generates all OpenQSP Core v0.1 operations by calling
+the production protocol codec directly.
