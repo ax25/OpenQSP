@@ -36,18 +36,8 @@ class Operation(IntEnum):
     BULLETIN_HEADER = 0x41
     BULLETIN = 0x42
     END = 0x43
-    ACK = 0x44
+    STORED = 0x44
     ERROR = 0x45
-
-
-class AckStatus(IntEnum):
-    """Durable processing outcomes carried by an ACK frame."""
-
-    STORED = 0x00
-    ALREADY_STORED = 0x01
-    REJECTED = 0x02
-    INVALID = 0x03
-    CONFLICT = 0x04
 
 
 class ErrorCode(IntEnum):

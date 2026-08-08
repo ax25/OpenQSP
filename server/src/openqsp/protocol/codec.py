@@ -19,7 +19,6 @@ from .constants import (
     MIN_RETRIEVAL_MAX,
     PROTOCOL_VERSION,
     UNSOLICITED_FLAG,
-    AckStatus,
     ErrorCode,
     Operation,
 )
@@ -32,7 +31,6 @@ from .errors import (
     UnsupportedVersionError,
 )
 from .models import (
-    Ack,
     Bulletin,
     BulletinHeader,
     End,
@@ -42,11 +40,12 @@ from .models import (
     GetNewMessages,
     Message,
     SendMessage,
+    Stored,
 )
 
 ProtocolObject: TypeAlias = (
     SendMessage | GetNewMessages | GetNewBulletins | GetBulletin | Message
-    | BulletinHeader | Bulletin | End | Ack | Error
+    | BulletinHeader | Bulletin | End | Stored | Error
 )
 PayloadDecoder: TypeAlias = Callable[[bytes], ProtocolObject]
 PayloadEncoder: TypeAlias = Callable[[ProtocolObject], bytes]
@@ -72,9 +71,6 @@ class _Reader:
 
     def u32(self, field: str) -> int:
         return int.from_bytes(self.take(4, field), "big")
-
-    def u64(self, field: str) -> int:
-        return int.from_bytes(self.take(8, field), "big")
 
     def prefixed(self, field: str) -> bytes:
         return self.take(self.u8(f"{field}_length"), field)
@@ -106,9 +102,6 @@ def _u8(value: object, field: str, *, nonzero: bool = False) -> bytes:
 def _u32(value: object, field: str, *, nonzero: bool = False) -> bytes:
     return _integer(value, 32, field, nonzero=nonzero).to_bytes(4, "big")
 
-
-def _u64(value: object, field: str, *, nonzero: bool = False) -> bytes:
-    return _integer(value, 64, field, nonzero=nonzero).to_bytes(8, "big")
 
 
 def _text_bytes(value: object, field: str, minimum: int, maximum: int) -> bytes:
@@ -176,26 +169,24 @@ def _prefix(data: bytes) -> bytes:
 
 def _decode_send_message(payload: bytes) -> SendMessage:
     reader = _Reader(payload)
-    message_id = reader.u64("message_id")
     created_at = reader.u32("created_at")
     recipient = _decode_callsign(reader.prefixed("recipient"), "recipient")
     body = _decode_text(reader.prefixed("body"), "body", MIN_MESSAGE_BODY_LENGTH, MAX_MESSAGE_BODY_LENGTH)
     reader.finish()
-    _integer(message_id, 64, "message_id", nonzero=True)
     _integer(created_at, 32, "created_at", nonzero=True)
-    return SendMessage(message_id, created_at, recipient, body)
+    return SendMessage(created_at, recipient, body)
 
 
 def _encode_send_message(obj: ProtocolObject) -> bytes:
     value = cast(SendMessage, obj)
     recipient = _callsign_bytes(value.recipient, "recipient")
     body = _text_bytes(value.body, "body", MIN_MESSAGE_BODY_LENGTH, MAX_MESSAGE_BODY_LENGTH)
-    return _u64(value.message_id, "message_id", nonzero=True) + _u32(value.created_at, "created_at", nonzero=True) + _prefix(recipient) + _prefix(body)
+    return _u32(value.created_at, "created_at", nonzero=True) + _prefix(recipient) + _prefix(body)
 
 
 def _decode_retrieval(payload: bytes, model: type[GetNewMessages] | type[GetNewBulletins], name: str) -> ProtocolObject:
-    _require_exact(payload, 9, name)
-    since, maximum = int.from_bytes(payload[:8], "big"), payload[8]
+    _require_exact(payload, 5, name)
+    since, maximum = int.from_bytes(payload[:4], "big"), payload[4]
     if not MIN_RETRIEVAL_MAX <= maximum <= MAX_RETRIEVAL_MAX:
         raise InvalidFieldError(f"max must be between {MIN_RETRIEVAL_MAX} and {MAX_RETRIEVAL_MAX}")
     return model(since=since, max=maximum)
@@ -205,7 +196,7 @@ def _encode_retrieval(obj: GetNewMessages | GetNewBulletins) -> bytes:
     maximum = _integer(obj.max, 8, "max")
     if not MIN_RETRIEVAL_MAX <= maximum <= MAX_RETRIEVAL_MAX:
         raise InvalidFieldError(f"max must be between {MIN_RETRIEVAL_MAX} and {MAX_RETRIEVAL_MAX}")
-    return _u64(obj.since, "since") + bytes((maximum,))
+    return _u32(obj.since, "since") + bytes((maximum,))
 
 
 def _decode_get_new_messages(payload: bytes) -> GetNewMessages:
@@ -225,65 +216,63 @@ def _encode_get_new_bulletins(obj: ProtocolObject) -> bytes:
 
 
 def _decode_get_bulletin(payload: bytes) -> GetBulletin:
-    _require_exact(payload, 8, "GET_BULLETIN")
-    bulletin_id = int.from_bytes(payload, "big")
-    _integer(bulletin_id, 64, "bulletin_id", nonzero=True)
-    return GetBulletin(bulletin_id)
+    _require_exact(payload, 4, "GET_BULLETIN")
+    sequence = int.from_bytes(payload, "big")
+    _integer(sequence, 32, "sequence", nonzero=True)
+    return GetBulletin(sequence)
 
 
 def _encode_get_bulletin(obj: ProtocolObject) -> bytes:
-    return _u64(cast(GetBulletin, obj).bulletin_id, "bulletin_id", nonzero=True)
+    return _u32(cast(GetBulletin, obj).sequence, "sequence", nonzero=True)
 
 
 def _decode_message(payload: bytes) -> Message:
     reader = _Reader(payload)
-    sequence, message_id, created_at = reader.u64("sequence"), reader.u64("message_id"), reader.u32("created_at")
+    sequence, created_at = reader.u32("sequence"), reader.u32("created_at")
     author = _decode_callsign(reader.prefixed("author"), "author")
     recipient = _decode_callsign(reader.prefixed("recipient"), "recipient")
     body = _decode_text(reader.prefixed("body"), "body", MIN_MESSAGE_BODY_LENGTH, MAX_MESSAGE_BODY_LENGTH)
     reader.finish()
-    _integer(sequence, 64, "sequence", nonzero=True)
-    _integer(message_id, 64, "message_id", nonzero=True)
+    _integer(sequence, 32, "sequence", nonzero=True)
     _integer(created_at, 32, "created_at", nonzero=True)
-    return Message(sequence, message_id, created_at, author, recipient, body)
+    return Message(sequence, created_at, author, recipient, body)
 
 
 def _encode_message(obj: ProtocolObject) -> bytes:
     value = cast(Message, obj)
     author, recipient = _callsign_bytes(value.author, "author"), _callsign_bytes(value.recipient, "recipient")
     body = _text_bytes(value.body, "body", MIN_MESSAGE_BODY_LENGTH, MAX_MESSAGE_BODY_LENGTH)
-    return _u64(value.sequence, "sequence", nonzero=True) + _u64(value.message_id, "message_id", nonzero=True) + _u32(value.created_at, "created_at", nonzero=True) + _prefix(author) + _prefix(recipient) + _prefix(body)
+    return _u32(value.sequence, "sequence", nonzero=True) + _u32(value.created_at, "created_at", nonzero=True) + _prefix(author) + _prefix(recipient) + _prefix(body)
 
 
 def _decode_bulletin_header(payload: bytes) -> BulletinHeader:
     reader = _Reader(payload)
-    sequence, bulletin_id, created_at = reader.u64("sequence"), reader.u64("bulletin_id"), reader.u32("created_at")
+    sequence, created_at = reader.u32("sequence"), reader.u32("created_at")
     author = _decode_callsign(reader.prefixed("author"), "author")
     title = _decode_text(reader.prefixed("title"), "title", MIN_BULLETIN_TITLE_LENGTH, MAX_BULLETIN_TITLE_LENGTH)
     reader.finish()
-    _integer(sequence, 64, "sequence", nonzero=True)
-    _integer(bulletin_id, 64, "bulletin_id", nonzero=True)
+    _integer(sequence, 32, "sequence", nonzero=True)
     _integer(created_at, 32, "created_at", nonzero=True)
-    return BulletinHeader(sequence, bulletin_id, created_at, author, title)
+    return BulletinHeader(sequence, created_at, author, title)
 
 
 def _encode_bulletin_header(obj: ProtocolObject) -> bytes:
     value = cast(BulletinHeader, obj)
     author = _callsign_bytes(value.author, "author")
     title = _text_bytes(value.title, "title", MIN_BULLETIN_TITLE_LENGTH, MAX_BULLETIN_TITLE_LENGTH)
-    return _u64(value.sequence, "sequence", nonzero=True) + _u64(value.bulletin_id, "bulletin_id", nonzero=True) + _u32(value.created_at, "created_at", nonzero=True) + _prefix(author) + _prefix(title)
+    return _u32(value.sequence, "sequence", nonzero=True) + _u32(value.created_at, "created_at", nonzero=True) + _prefix(author) + _prefix(title)
 
 
 def _decode_bulletin(payload: bytes) -> Bulletin:
     reader = _Reader(payload)
-    bulletin_id, created_at = reader.u64("bulletin_id"), reader.u32("created_at")
+    sequence, created_at = reader.u32("sequence"), reader.u32("created_at")
     author = _decode_callsign(reader.prefixed("author"), "author")
     title = _decode_text(reader.prefixed("title"), "title", MIN_BULLETIN_TITLE_LENGTH, MAX_BULLETIN_TITLE_LENGTH)
     body = _decode_text(reader.prefixed("body"), "body", MIN_BULLETIN_BODY_LENGTH, MAX_BULLETIN_BODY_LENGTH)
     reader.finish()
-    _integer(bulletin_id, 64, "bulletin_id", nonzero=True)
+    _integer(sequence, 32, "sequence", nonzero=True)
     _integer(created_at, 32, "created_at", nonzero=True)
-    return Bulletin(bulletin_id, created_at, author, title, body)
+    return Bulletin(sequence, created_at, author, title, body)
 
 
 def _encode_bulletin(obj: ProtocolObject) -> bytes:
@@ -291,20 +280,20 @@ def _encode_bulletin(obj: ProtocolObject) -> bytes:
     author = _callsign_bytes(value.author, "author")
     title = _text_bytes(value.title, "title", MIN_BULLETIN_TITLE_LENGTH, MAX_BULLETIN_TITLE_LENGTH)
     body = _text_bytes(value.body, "body", MIN_BULLETIN_BODY_LENGTH, MAX_BULLETIN_BODY_LENGTH)
-    return _u64(value.bulletin_id, "bulletin_id", nonzero=True) + _u32(value.created_at, "created_at", nonzero=True) + _prefix(author) + _prefix(title) + _prefix(body)
+    return _u32(value.sequence, "sequence", nonzero=True) + _u32(value.created_at, "created_at", nonzero=True) + _prefix(author) + _prefix(title) + _prefix(body)
 
 
 def _decode_end(payload: bytes) -> End:
-    _require_exact(payload, 11, "END")
+    _require_exact(payload, 7, "END")
     try:
         request_operation = Operation(payload[0])
     except ValueError:
         raise InvalidFieldError("END request_operation must be a retrieval operation") from None
     if request_operation not in (Operation.GET_NEW_MESSAGES, Operation.GET_NEW_BULLETINS):
         raise InvalidFieldError("END request_operation must be a retrieval operation")
-    if payload[10] not in (0, 1):
+    if payload[6] not in (0, 1):
         raise InvalidFieldError("has_more must be 0x00 or 0x01")
-    return End(request_operation, payload[1], int.from_bytes(payload[2:10], "big"), bool(payload[10]))
+    return End(request_operation, payload[1], int.from_bytes(payload[2:6], "big"), bool(payload[6]))
 
 
 def _encode_end(obj: ProtocolObject) -> bytes:
@@ -313,25 +302,16 @@ def _encode_end(obj: ProtocolObject) -> bytes:
         raise InvalidFieldError("END request_operation must be a retrieval operation")
     if not isinstance(value.has_more, bool):
         raise InvalidFieldError("has_more must be a bool")
-    return bytes((value.request_operation,)) + _u8(value.returned_count, "returned_count") + _u64(value.next_since, "next_since") + bytes((value.has_more,))
+    return bytes((value.request_operation,)) + _u8(value.returned_count, "returned_count") + _u32(value.next_since, "next_since") + bytes((value.has_more,))
 
 
-def _decode_ack(payload: bytes) -> Ack:
-    _require_exact(payload, 9, "ACK")
-    object_id = int.from_bytes(payload[:8], "big")
-    _integer(object_id, 64, "object_id", nonzero=True)
-    try:
-        status = AckStatus(payload[8])
-    except ValueError:
-        raise InvalidFieldError(f"unknown ACK status: 0x{payload[8]:02x}") from None
-    return Ack(object_id, status)
+def _decode_stored(payload: bytes) -> Stored:
+    _require_exact(payload, 0, "STORED")
+    return Stored()
 
 
-def _encode_ack(obj: ProtocolObject) -> bytes:
-    value = cast(Ack, obj)
-    if not isinstance(value.status, AckStatus):
-        raise InvalidFieldError("status must be a known AckStatus")
-    return _u64(value.object_id, "object_id", nonzero=True) + bytes((value.status,))
+def _encode_stored(obj: ProtocolObject) -> bytes:
+    return b""
 
 
 def _decode_error(payload: bytes) -> Error:
@@ -376,7 +356,7 @@ _DECODERS: dict[Operation, PayloadDecoder] = {
     Operation.BULLETIN_HEADER: _decode_bulletin_header,
     Operation.BULLETIN: _decode_bulletin,
     Operation.END: _decode_end,
-    Operation.ACK: _decode_ack,
+    Operation.STORED: _decode_stored,
     Operation.ERROR: _decode_error,
 }
 _ENCODERS: dict[type[object], tuple[Operation, PayloadEncoder]] = {
@@ -388,7 +368,7 @@ _ENCODERS: dict[type[object], tuple[Operation, PayloadEncoder]] = {
     BulletinHeader: (Operation.BULLETIN_HEADER, _encode_bulletin_header),
     Bulletin: (Operation.BULLETIN, _encode_bulletin),
     End: (Operation.END, _encode_end),
-    Ack: (Operation.ACK, _encode_ack),
+    Stored: (Operation.STORED, _encode_stored),
     Error: (Operation.ERROR, _encode_error),
 }
 

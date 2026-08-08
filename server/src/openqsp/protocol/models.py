@@ -2,12 +2,11 @@
 
 from dataclasses import dataclass
 
-from .constants import AckStatus, ErrorCode, Operation
+from .constants import ErrorCode, Operation
 
 
 @dataclass(frozen=True)
 class SendMessage:
-    message_id: int
     created_at: int
     recipient: str
     body: str
@@ -27,13 +26,12 @@ class GetNewBulletins:
 
 @dataclass(frozen=True)
 class GetBulletin:
-    bulletin_id: int
+    sequence: int
 
 
 @dataclass(frozen=True)
 class Message:
     sequence: int
-    message_id: int
     created_at: int
     author: str
     recipient: str
@@ -43,7 +41,6 @@ class Message:
 @dataclass(frozen=True)
 class BulletinHeader:
     sequence: int
-    bulletin_id: int
     created_at: int
     author: str
     title: str
@@ -51,7 +48,7 @@ class BulletinHeader:
 
 @dataclass(frozen=True)
 class Bulletin:
-    bulletin_id: int
+    sequence: int
     created_at: int
     author: str
     title: str
@@ -67,9 +64,8 @@ class End:
 
 
 @dataclass(frozen=True)
-class Ack:
-    object_id: int
-    status: AckStatus
+class Stored:
+    """Confirms that a SEND_MESSAGE transaction committed durably."""
 
 
 @dataclass(frozen=True)

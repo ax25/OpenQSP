@@ -115,8 +115,8 @@ Development scenarios should begin exercising storage behaviour directly, includ
 Acceptance criteria:
 
 - a new message is stored atomically and receives a stable sequence;
-- identical retries return `ALREADY_STORED` without creating duplicates;
-- identifier reuse with different content returns `CONFLICT`;
+- durable sends return zero-payload `STORED`;
+- unreliable-transport retry/deduplication remains outside Core;
 - object identifiers are unique across all object types;
 - messages can be retrieved by recipient and `since` cursor;
 - bulletin headers can be retrieved incrementally;
@@ -156,7 +156,7 @@ Acceptance criteria:
 
 - the authenticated callsign is used as message author;
 - the client cannot inject a different author;
-- every supported request produces the correct `ACK`, object frames, `END` or `ERROR` response;
+- every supported request produces the correct `STORED`, object frames, `END` or `ERROR` response;
 - one user cannot retrieve another user's private messages;
 - partial multi-item responses never advance a client cursor without `END`;
 - malformed frames do not crash or corrupt the node;
@@ -177,7 +177,7 @@ exchange one private message through the production codec, server core, and
 persistent store, with automated checks for mailbox isolation. M4.2 adds the
 identical-message retry after a lost application acknowledgement and verifies
 that it creates neither a duplicate nor a sequence gap. M4.3 demonstrates that
-reusing a stored message identifier with a changed body returns `CONFLICT`,
+mailbox-local sequence allocation remains atomic under concurrency,
 leaves the original intact, and consumes no sequence. M4.4 implements
 incremental mailbox synchronization with response-derived cursors, mailbox
 isolation, suppression of previously delivered messages, and a final empty

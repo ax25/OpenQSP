@@ -11,10 +11,8 @@ from collections.abc import Callable
 import socket
 import threading
 import time
-import uuid
 
 from openqsp.protocol import (
-    Ack,
     Bulletin,
     BulletinHeader,
     End,
@@ -26,6 +24,7 @@ from openqsp.protocol import (
     Operation,
     ProtocolObject,
     SendMessage,
+    Stored,
     decode_frame_with_flags,
     encode_frame,
     validate_callsign,
@@ -152,14 +151,12 @@ class OpenQSPClient:
         recipient: str,
         body: str,
         *,
-        message_id: int | None = None,
         created_at: int | None = None,
-    ) -> Ack:
-        """Send one title-less private message and return its acknowledgement."""
-        object_id = message_id if message_id is not None else (uuid.uuid4().int & ((1 << 64) - 1)) or 1
+    ) -> Stored:
+        """Send one private message and wait for durable storage."""
         timestamp = created_at if created_at is not None else int(time.time())
-        responses = self.request(SendMessage(object_id, timestamp, recipient, body))
-        if len(responses) != 1 or not isinstance(responses[0], Ack):
+        responses = self.request(SendMessage(timestamp, recipient, body))
+        if len(responses) != 1 or not isinstance(responses[0], Stored):
             raise ClientError("server returned an unexpected SEND_MESSAGE response")
         return responses[0]
 
@@ -177,8 +174,8 @@ class OpenQSPClient:
             raise ClientError("server returned an unexpected GET_NEW_BULLETINS response")
         return list(responses[:-1]), end
 
-    def get_bulletin(self, bulletin_id: int) -> Bulletin:
-        responses = self.request(GetBulletin(bulletin_id))
+    def get_bulletin(self, sequence: int) -> Bulletin:
+        responses = self.request(GetBulletin(sequence))
         if len(responses) != 1 or not isinstance(responses[0], Bulletin):
             raise ClientError("server returned an unexpected GET_BULLETIN response")
         return responses[0]
@@ -314,7 +311,7 @@ class OpenQSPClient:
         if isinstance(last, Error):
             return True
         if self._pending_operation == Operation.SEND_MESSAGE:
-            return isinstance(last, Ack)
+            return isinstance(last, Stored)
         if self._pending_operation in (Operation.GET_NEW_MESSAGES, Operation.GET_NEW_BULLETINS):
             return isinstance(last, End) and last.request_operation == self._pending_operation
         if self._pending_operation == Operation.GET_BULLETIN:
