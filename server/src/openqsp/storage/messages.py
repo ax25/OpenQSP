@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from ._common import (
     MAX_SQLITE_INTEGER,
     MAX_U64,
+    InvalidCursorError,
     SequenceExhaustedError,
     StorageIntegrityError,
     StoreOutcome,
@@ -44,10 +45,6 @@ class MessagePage:
     messages: tuple[StoredMessage, ...]
     next_since: int
     has_more: bool
-
-
-class InvalidCursorError(ValueError):
-    """Raised when a cursor is ahead of the node's global message stream."""
 
 
 def message_content_hash(

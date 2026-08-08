@@ -7,10 +7,12 @@ import sqlite3
 import time
 from collections.abc import Callable
 from contextlib import closing
+from dataclasses import dataclass
 
 from ._common import (
     MAX_SQLITE_INTEGER,
     MAX_U64,
+    InvalidCursorError,
     SequenceExhaustedError,
     StorageIntegrityError,
     StoreOutcome,
@@ -20,6 +22,39 @@ from ._common import (
 )
 from .database import Database
 from .migrations import decode_u64, encode_u64
+
+MAX_RETRIEVAL_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class StoredBulletinHeader:
+    """Public metadata for one persisted bulletin."""
+
+    sequence: int
+    bulletin_id: int
+    created_at: int
+    author: str
+    title: str
+
+
+@dataclass(frozen=True)
+class StoredBulletin:
+    """One complete bulletin read from persistent storage."""
+
+    bulletin_id: int
+    created_at: int
+    author: str
+    title: str
+    body: str
+
+
+@dataclass(frozen=True)
+class BulletinPage:
+    """One incremental bulletin-header page and its cursor metadata."""
+
+    headers: tuple[StoredBulletinHeader, ...]
+    next_since: int
+    has_more: bool
 
 
 def bulletin_content_hash(
@@ -55,6 +90,64 @@ class BulletinStore:
     ) -> None:
         self._database = database
         self._clock = clock if clock is not None else lambda: int(time.time())
+
+    def get_new_bulletins(self, *, since: int, limit: int) -> BulletinPage:
+        """Return public bulletin headers after ``since`` in sequence order."""
+
+        require_u64("since", since)
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= MAX_RETRIEVAL_LIMIT
+        ):
+            raise ValueError(
+                f"limit must be an integer between 1 and {MAX_RETRIEVAL_LIMIT}"
+            )
+
+        with closing(self._database.connect()) as connection:
+            connection.execute("BEGIN")
+            try:
+                sequence_row = connection.execute(
+                    "SELECT last_value FROM sequences WHERE stream = 'bulletins'"
+                ).fetchone()
+                if sequence_row is None:
+                    raise StorageIntegrityError("bulletins sequence state is missing")
+                highest = _decode_stored_u64(
+                    sequence_row["last_value"], field="bulletins last sequence"
+                )
+                if since > highest:
+                    raise InvalidCursorError(
+                        f"bulletin cursor {since} is ahead of highest sequence {highest}"
+                    )
+                rows = connection.execute(
+                    """SELECT sequence, bulletin_id, created_at, author, title
+                       FROM bulletins
+                       WHERE sequence > ?
+                       ORDER BY sequence ASC
+                       LIMIT ?""",
+                    (encode_u64(since), limit + 1),
+                ).fetchall()
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+        has_more = len(rows) > limit
+        headers = tuple(_stored_bulletin_header(row) for row in rows[:limit])
+        next_since = headers[-1].sequence if headers else since
+        return BulletinPage(headers, next_since, has_more)
+
+    def get_bulletin(self, *, bulletin_id: int) -> StoredBulletin | None:
+        """Return a complete bulletin by ID, or ``None`` when it is absent."""
+
+        require_u64("bulletin_id", bulletin_id)
+        with closing(self._database.connect()) as connection:
+            row = connection.execute(
+                """SELECT bulletin_id, created_at, author, title, body
+                   FROM bulletins WHERE bulletin_id = ?""",
+                (encode_u64(bulletin_id),),
+            ).fetchone()
+        return None if row is None else _stored_bulletin(row)
 
     def store_bulletin(
         self,
@@ -191,3 +284,58 @@ class BulletinStore:
                 StoreResult.ALREADY_STORED, decode_u64(row["sequence"])
             )
         return StoreOutcome(StoreResult.CONFLICT, None)
+
+
+def _decode_stored_u64(value: object, *, field: str) -> int:
+    if not isinstance(value, bytes):
+        raise StorageIntegrityError(f"{field} is not an eight-byte BLOB")
+    try:
+        return decode_u64(value)
+    except ValueError as error:
+        raise StorageIntegrityError(f"{field} is not an eight-byte BLOB") from error
+
+
+def _stored_bulletin_header(row: sqlite3.Row) -> StoredBulletinHeader:
+    sequence = _decode_stored_u64(row["sequence"], field="bulletin sequence")
+    bulletin_id = _decode_stored_u64(row["bulletin_id"], field="bulletin id")
+    created_at = row["created_at"]
+    author = row["author"]
+    title = row["title"]
+    if sequence == 0:
+        raise StorageIntegrityError("bulletin sequence must be non-zero")
+    if bulletin_id == 0:
+        raise StorageIntegrityError("bulletin id must be non-zero")
+    if (
+        not isinstance(created_at, int)
+        or isinstance(created_at, bool)
+        or created_at < 0
+    ):
+        raise StorageIntegrityError("bulletin created_at is invalid")
+    if not isinstance(author, str) or not isinstance(title, str):
+        raise StorageIntegrityError("bulletin author or title is not text")
+    return StoredBulletinHeader(sequence, bulletin_id, created_at, author, title)
+
+
+def _stored_bulletin(row: sqlite3.Row) -> StoredBulletin:
+    bulletin_id = _decode_stored_u64(row["bulletin_id"], field="bulletin id")
+    created_at = row["created_at"]
+    author = row["author"]
+    title = row["title"]
+    body = row["body"]
+    if bulletin_id == 0:
+        raise StorageIntegrityError("bulletin id must be non-zero")
+    if (
+        not isinstance(created_at, int)
+        or isinstance(created_at, bool)
+        or created_at < 0
+    ):
+        raise StorageIntegrityError("bulletin created_at is invalid")
+    if not isinstance(author, str) or not isinstance(title, str):
+        raise StorageIntegrityError("bulletin author or title is not text")
+    if not isinstance(body, bytes):
+        raise StorageIntegrityError("bulletin body is not a BLOB")
+    try:
+        decoded_body = body.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise StorageIntegrityError("bulletin body is not valid UTF-8") from error
+    return StoredBulletin(bulletin_id, created_at, author, title, decoded_body)
