@@ -47,6 +47,31 @@ The SSID is transport addressing only. It does not create a separate OpenQSP use
 
 A node may remember the most recently usable APRS address for an OpenQSP user in order to deliver frames, but that address is not stored inside messages or bulletins.
 
+#### 3.1.1 OpenQSP APRS service identity
+
+The APRS service identity is **`OPENQSP`**.
+
+`OPENQSP` is used as:
+
+- the APRS-IS login name of the OpenQSP service;
+- the APRS message addressee for traffic sent by users to the service;
+- the APRS source address for traffic originated by the service.
+
+The service therefore does not require a personal amateur callsign or SSID as an intermediate public identity. At the APRS layer the intended interaction is simply:
+
+```text
+EA3GNU  -> OPENQSP
+OPENQSP -> EA3GNU
+```
+
+The normal APRS-IS passcode mechanism is used to establish a verified `OPENQSP` connection. Passcodes are deployment credentials and are not stored in this repository.
+
+For a filtered APRS-IS connection, the service may request only APRS messages addressed to itself using:
+
+```text
+filter g/OPENQSP
+```
+
 ### 3.2 User activity
 
 Each node maintains a temporary activity timer for each user communicating through APRS. This timer is operational state in the APRS transport layer, not a session or presence protocol.
@@ -104,6 +129,91 @@ Two nodes may legitimately hold different activity states for the same user.
 Proactive APRS delivery must be rate-limited and must respect channel capacity, duplicate suppression and transport rules.
 
 Detailed timing, retry count, fragmentation and APRS text-safe encoding remain to be specified in a dedicated APRS transport profile.
+
+### 3.7 APRS-IS experimental verification
+
+The basic APRS-IS integration was manually verified on **2026-08-08** before implementation of the production transport adapter.
+
+These tests were performed with small standalone Python programs outside the repository. The test code is intentionally not part of OpenQSP; only the verified behaviour is recorded here.
+
+#### Test A — verified service login
+
+A TCP connection was opened to the APRS-IS filtered port and the service logged in using `OPENQSP` as its login identity:
+
+```text
+user OPENQSP pass <passcode> vers OpenQSP-Test 0.1 filter g/OPENQSP
+```
+
+The APRS-IS server returned:
+
+```text
+# logresp OPENQSP verified, server T2GB
+```
+
+This verifies that `OPENQSP` can establish a normal **verified APRS-IS session** using the standard APRS-IS passcode mechanism. A personal callsign such as `EA3GNU-10` is therefore not required as the server identity.
+
+#### Test B — filtered inbound message and service reply
+
+A second verified APRS-IS client logged in as `EA3GNU` and injected the following APRS message directly into APRS-IS:
+
+```text
+EA3GNU>APRS,TCPIP*::OPENQSP  :HOLA OPENQSP
+```
+
+The OpenQSP echo test process was connected as `OPENQSP` with:
+
+```text
+filter g/OPENQSP
+```
+
+It received the message addressed to `OPENQSP` and injected a reply with `OPENQSP` as the APRS source:
+
+```text
+OPENQSP>APOQSP,TCPIP*::EA3GNU   :MESSAGE OK: HOLA OPENQSP
+```
+
+The `EA3GNU` APRS-IS client received the resulting packet as:
+
+```text
+OPENQSP>APOQSP,TCPIP*,qAC,T2SPAIN::EA3GNU   :MESSAGE OK: HOLA OPENQSP
+```
+
+This verifies the complete Internet-only path:
+
+```text
+EA3GNU -> APRS-IS -> OPENQSP -> APRS-IS -> EA3GNU
+```
+
+No RF transmission, digipeater or IGate was involved in this test.
+
+#### Test C — Tier-2 server observation
+
+An initial test used `rotate.aprs2.net` independently for both clients. The connections were assigned to different Tier-2 servers (`T2GB` and `T2SPAIN`) and the expected message was not observed by the `OPENQSP` test process during that run.
+
+When both clients were connected to `T2SPAIN`, the bidirectional test succeeded immediately.
+
+This observation **does not establish a protocol requirement that both endpoints use the same Tier-2 server**. Normal APRS-IS operation must not depend on that assumption. Cross-server propagation and the correct production server-selection strategy therefore remain an explicit item to verify before the APRS transport is considered production-ready.
+
+#### Verified conclusions
+
+The tests establish that:
+
+- `OPENQSP` is accepted as an APRS-IS login identity;
+- the `OPENQSP` login can be verified using the standard APRS-IS passcode mechanism;
+- `g/OPENQSP` can be used to restrict the service feed to messages addressed to `OPENQSP` in the tested configuration;
+- users can address APRS messages directly to `OPENQSP`;
+- the service can originate APRS messages with `OPENQSP` as the source;
+- bidirectional APRS messaging works without any personal server callsign appearing in the public message flow;
+- direct APRS-IS injection is sufficient for development testing without RF coverage.
+
+The following remain to be validated separately:
+
+- APRS message IDs and transport-level ACK/retry behaviour;
+- duplicate handling;
+- message size and fragmentation policy for OpenQSP frames;
+- RF -> IGate -> APRS-IS -> OpenQSP operation;
+- OpenQSP -> APRS-IS -> IGate -> RF operation;
+- reliable cross-server behaviour when clients and IGates enter APRS-IS through different servers.
 
 ---
 
