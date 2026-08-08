@@ -199,6 +199,19 @@ python tools/scenarios/incremental_mailbox_sync.py /tmp/openqsp-m4.4.db
 Use a new database path (or remove the previous laboratory database) before
 repeating this deterministic scenario.
 
+The M4.5 scenario makes empty synchronization an explicit end-to-end
+guarantee. It checks both a mailbox queried from `since=0` and a previously
+synchronized mailbox queried from its completed `END` cursor. Unrelated
+mailbox activity advances the node's global sequence without changing the
+empty response's cursor:
+
+```bash
+python tools/scenarios/empty_mailbox_sync.py /tmp/openqsp-m4.5.db
+```
+
+Use a new database path (or remove the previous laboratory database) before
+repeating this deterministic scenario.
+
 A scenario should clearly report the sequence of logical actions, frames and expected results.
 
 Where practical, scenarios should also be executable from automated tests so that manual laboratory workflows and CI verification exercise the same code paths.
