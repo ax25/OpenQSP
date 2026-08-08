@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping, Sequence
 
-LATEST_SCHEMA_VERSION = 1
+LATEST_SCHEMA_VERSION = 2
 
 # OpenQSP object IDs and synchronization sequences are unsigned 64-bit values,
 # while SQLite INTEGER is signed. Both are stored as exactly eight big-endian
@@ -120,7 +120,78 @@ _MIGRATION_1 = (
     """,
 )
 
-MIGRATIONS: Mapping[int, Sequence[str]] = {1: _MIGRATION_1}
+_MIGRATION_2 = (
+    "ALTER TABLE messages RENAME TO messages_v1",
+    "ALTER TABLE bulletins RENAME TO bulletins_v1",
+    """
+    CREATE TABLE mailbox_sequences (
+        recipient TEXT PRIMARY KEY,
+        last_value INTEGER NOT NULL
+            CHECK(typeof(last_value) = 'integer' AND last_value BETWEEN 0 AND 4294967295)
+    )
+    """,
+    """
+    CREATE TABLE messages (
+        recipient TEXT NOT NULL,
+        mailbox_sequence INTEGER NOT NULL
+            CHECK(typeof(mailbox_sequence) = 'integer' AND mailbox_sequence BETWEEN 1 AND 4294967295),
+        created_at INTEGER NOT NULL
+            CHECK(typeof(created_at) = 'integer' AND created_at BETWEEN 0 AND 4294967295),
+        accepted_at INTEGER NOT NULL
+            CHECK(typeof(accepted_at) = 'integer' AND accepted_at >= 0),
+        author TEXT NOT NULL,
+        body BLOB NOT NULL,
+        PRIMARY KEY(recipient, mailbox_sequence)
+    ) WITHOUT ROWID
+    """,
+    """
+    INSERT INTO messages(recipient, mailbox_sequence, created_at, accepted_at, author, body)
+    SELECT recipient,
+           ROW_NUMBER() OVER (PARTITION BY recipient ORDER BY sequence, message_id),
+           created_at, accepted_at, author, body
+      FROM messages_v1
+     ORDER BY sequence, message_id
+    """,
+    """
+    INSERT INTO mailbox_sequences(recipient, last_value)
+    SELECT recipient, MAX(mailbox_sequence) FROM messages GROUP BY recipient
+    """,
+    """
+    CREATE TABLE bulletin_sequence (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        last_value INTEGER NOT NULL
+            CHECK(typeof(last_value) = 'integer' AND last_value BETWEEN 0 AND 4294967295)
+    )
+    """,
+    "INSERT INTO bulletin_sequence(singleton, last_value) VALUES (1, 0)",
+    """
+    CREATE TABLE bulletins (
+        sequence INTEGER PRIMARY KEY
+            CHECK(typeof(sequence) = 'integer' AND sequence BETWEEN 1 AND 4294967295),
+        created_at INTEGER NOT NULL
+            CHECK(typeof(created_at) = 'integer' AND created_at BETWEEN 0 AND 4294967295),
+        accepted_at INTEGER NOT NULL
+            CHECK(typeof(accepted_at) = 'integer' AND accepted_at >= 0),
+        author TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body BLOB NOT NULL
+    )
+    """,
+    """
+    INSERT INTO bulletins(sequence, created_at, accepted_at, author, title, body)
+    SELECT ROW_NUMBER() OVER (ORDER BY sequence, bulletin_id),
+           created_at, accepted_at, author, title, body
+      FROM bulletins_v1
+     ORDER BY sequence, bulletin_id
+    """,
+    "UPDATE bulletin_sequence SET last_value = (SELECT COUNT(*) FROM bulletins)",
+    "DROP TABLE messages_v1",
+    "DROP TABLE bulletins_v1",
+    "DROP TABLE objects",
+    "DROP TABLE sequences",
+)
+
+MIGRATIONS: Mapping[int, Sequence[str]] = {1: _MIGRATION_1, 2: _MIGRATION_2}
 
 
 def migrate(
