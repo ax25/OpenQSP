@@ -11,7 +11,11 @@ TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import LocalCoreClient  # noqa: E402
+from scenario_environment import (  # noqa: E402
+    LocalScenarioEnvironment,
+    ScenarioClient,
+    ScenarioEnvironment,
+)
 from openqsp.protocol import (  # noqa: E402
     Ack,
     AckStatus,
@@ -22,8 +26,6 @@ from openqsp.protocol import (  # noqa: E402
     ProtocolObject,
     SendMessage,
 )
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import Database, MessageStore  # noqa: E402
 
 
 SENDER = "EA3AAA"
@@ -43,14 +45,10 @@ class ScenarioResult:
     recipient_after_cursor: list[ProtocolObject]
 
 
-def run_scenario(database_path: str | Path) -> ScenarioResult:
+def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     """Retry one unchanged request and verify idempotency via public interfaces."""
-    database = Database(database_path)
-    database.initialize()
-    core = ServerCore(message_store=MessageStore(database))
-
-    sender = LocalCoreClient(core, SENDER)
-    recipient = LocalCoreClient(core, RECIPIENT)
+    sender = env.client(SENDER)
+    recipient = env.client(RECIPIENT)
     request = SendMessage(MESSAGE_ID, CREATED_AT, RECIPIENT, BODY)
 
     # The node processes and returns the first ACK normally.  The simulated
@@ -115,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: message_retry_after_lost_ack.py DATABASE", file=sys.stderr)
         return 2
 
-    result = run_scenario(argv[0])
+    result = run_scenario(LocalScenarioEnvironment(argv[0]))
     for label, responses in (
         (SENDER + " first send (ACK intentionally ignored)", result.first_send),
         (SENDER + " identical retry", result.retry_send),

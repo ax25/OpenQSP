@@ -2,13 +2,17 @@
 """Run the M4.7 node-restart and persistent synchronization scenario."""
 from __future__ import annotations
 from dataclasses import dataclass
-import gc
 from pathlib import Path
 import sys
 TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
-from client_sim import LocalCoreClient, completed_cursor  # noqa: E402
+from client_sim import completed_cursor  # noqa: E402
+from scenario_environment import (  # noqa: E402
+    LocalScenarioEnvironment,
+    ScenarioClient,
+    ScenarioEnvironment,
+)
 from openqsp.protocol import (  # noqa: E402
     Ack,
     AckStatus,
@@ -19,8 +23,6 @@ from openqsp.protocol import (  # noqa: E402
     ProtocolObject,
     SendMessage,
 )
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import BulletinStore, Database, MessageStore  # noqa: E402
 
 SENDER = "EA3AAA"
 RECIPIENT = "EA3BBB"
@@ -43,48 +45,36 @@ class ScenarioResult:
     unrelated_after_restart: list[ProtocolObject]
     sender_after_restart: list[ProtocolObject]
 
-def _new_node(
-    database_path: str | Path,
-) -> tuple[Database, MessageStore, BulletinStore, ServerCore]:
-    database = Database(database_path)
-    database.initialize()
-    messages = MessageStore(database)
-    bulletins = BulletinStore(database)
-    core = ServerCore(message_store=messages, bulletin_store=bulletins)
-    return database, messages, bulletins, core
-
 def _cursor(responses: list[ProtocolObject]) -> int:
     cursor = completed_cursor(responses, Operation.GET_NEW_MESSAGES)
     if cursor is None:
         raise AssertionError("synchronization did not finish with a valid END")
     return cursor
 
-def _send(client: LocalCoreClient, message: SendMessage) -> list[ProtocolObject]:
+def _send(client: ScenarioClient, message: SendMessage) -> list[ProtocolObject]:
     responses = client.request(message)
     expected = [Ack(message.message_id, AckStatus.STORED)]
     if responses != expected:
         raise AssertionError(f"expected ACK/STORED, got {responses!r}")
     return responses
 
-def run_scenario(database_path: str | Path) -> ScenarioResult:
+def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     """Reconstruct a node while retaining only its persistent database file."""
-    database, messages, bulletins, core = _new_node(database_path)
-    sender = LocalCoreClient(core, SENDER)
-    recipient = LocalCoreClient(core, RECIPIENT)
-    unrelated = LocalCoreClient(core, UNRELATED_USER)
+    sender = env.client(SENDER)
+    recipient = env.client(RECIPIENT)
+    unrelated = env.client(UNRELATED_USER)
     send_a = _send(sender, MESSAGE_A)
     first_sync = recipient.request(GetNewMessages(0, SYNC_LIMIT))
     first_cursor = _cursor(first_sync)
     unrelated_before_restart = unrelated.request(GetNewMessages(0, SYNC_LIMIT))
 
-    # Retain no node, store, database, or client object across the restart.
-    del sender, recipient, unrelated, core, bulletins, messages, database
-    gc.collect()
+    # Drop scenario clients, then explicitly reconstruct the node.
+    del sender, recipient, unrelated
+    env.restart_node()
 
-    database, messages, bulletins, core = _new_node(database_path)
-    sender = LocalCoreClient(core, SENDER)
-    recipient = LocalCoreClient(core, RECIPIENT)
-    unrelated = LocalCoreClient(core, UNRELATED_USER)
+    sender = env.client(SENDER)
+    recipient = env.client(RECIPIENT)
+    unrelated = env.client(UNRELATED_USER)
     durable_sync = recipient.request(GetNewMessages(0, SYNC_LIMIT))
     empty_from_old_cursor = recipient.request(
         GetNewMessages(first_cursor, SYNC_LIMIT)
@@ -131,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(argv) != 1:
         print("usage: node_restart_persistence.py DATABASE", file=sys.stderr)
         return 2
-    result = run_scenario(argv[0])
+    result = run_scenario(LocalScenarioEnvironment(argv[0]))
     _print("Message A stored", result.send_a)
     print(f"First completed cursor (from END): {result.first_cursor}")
     print("Simulated node restart (all node and storage objects reconstructed)")

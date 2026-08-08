@@ -11,7 +11,12 @@ TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import LocalCoreClient, completed_cursor  # noqa: E402
+from client_sim import completed_cursor  # noqa: E402
+from scenario_environment import (  # noqa: E402
+    LocalScenarioEnvironment,
+    ScenarioClient,
+    ScenarioEnvironment,
+)
 from openqsp.protocol import (  # noqa: E402
     Ack,
     AckStatus,
@@ -22,8 +27,6 @@ from openqsp.protocol import (  # noqa: E402
     ProtocolObject,
     SendMessage,
 )
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import Database, MessageStore  # noqa: E402
 
 
 EMPTY_RECIPIENT = "EA3BBB"
@@ -51,7 +54,7 @@ class ScenarioResult:
     repeated_empty_sync: list[ProtocolObject]
 
 
-def _send(client: LocalCoreClient, message: SendMessage) -> list[ProtocolObject]:
+def _send(client: ScenarioClient, message: SendMessage) -> list[ProtocolObject]:
     responses = client.request(message)
     expected = [Ack(message.message_id, AckStatus.STORED)]
     if responses != expected:
@@ -61,15 +64,11 @@ def _send(client: LocalCoreClient, message: SendMessage) -> list[ProtocolObject]
     return responses
 
 
-def run_scenario(database_path: str | Path) -> ScenarioResult:
+def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     """Exercise empty synchronization through the public local Core stack."""
-    database = Database(database_path)
-    database.initialize()
-    core = ServerCore(message_store=MessageStore(database))
-
-    sender = LocalCoreClient(core, "EA3AAA")
-    empty_recipient = LocalCoreClient(core, EMPTY_RECIPIENT)
-    synced_recipient = LocalCoreClient(core, SYNCED_RECIPIENT)
+    sender = env.client("EA3AAA")
+    empty_recipient = env.client(EMPTY_RECIPIENT)
+    synced_recipient = env.client(SYNCED_RECIPIENT)
 
     initial_empty_sync = empty_recipient.request(GetNewMessages(0, SYNC_LIMIT))
 
@@ -127,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: empty_mailbox_sync.py DATABASE", file=sys.stderr)
         return 2
 
-    result = run_scenario(argv[0])
+    result = run_scenario(LocalScenarioEnvironment(argv[0]))
     _print_responses("EA3BBB initial empty sync", result.initial_empty_sync)
     _print_responses("EA3CCC message setup", result.synced_send)
     _print_responses("EA3CCC initial sync", result.initial_sync)

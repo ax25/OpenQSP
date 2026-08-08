@@ -14,6 +14,12 @@ from openqsp.protocol import (
 )
 
 
+TOOLS_ROOT = Path(__file__).parents[3] / "tools"
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from scenario_environment import LocalScenarioEnvironment  # noqa: E402
+
 SCENARIO_PATH = (
     Path(__file__).parents[3] / "tools" / "scenarios" / "bulletin_sync_retrieval.py"
 )
@@ -35,7 +41,7 @@ def _header(sequence: int, bulletin: Bulletin) -> BulletinHeader:
 
 
 def test_bulletin_sync_retrieval_and_resume(tmp_path) -> None:
-    result = scenario.run_scenario(tmp_path / "node.db")
+    result = scenario.run_scenario(LocalScenarioEnvironment(tmp_path / "node.db"))
 
     first_headers = result.initial_sync[:-1]
     first_end = result.initial_sync[-1]

@@ -11,7 +11,12 @@ TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import LocalCoreClient, completed_cursor  # noqa: E402
+from client_sim import completed_cursor  # noqa: E402
+from scenario_environment import (  # noqa: E402
+    LocalScenarioEnvironment,
+    ScenarioClient,
+    ScenarioEnvironment,
+)
 from openqsp.protocol import (  # noqa: E402
     Ack,
     AckStatus,
@@ -22,8 +27,6 @@ from openqsp.protocol import (  # noqa: E402
     ProtocolObject,
     SendMessage,
 )
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import Database, MessageStore  # noqa: E402
 
 
 RECIPIENT = "EA3BBB"
@@ -58,7 +61,7 @@ class ScenarioResult:
     request_since: list[int]
 
 
-def _send(client: LocalCoreClient, message: SendMessage) -> list[ProtocolObject]:
+def _send(client: ScenarioClient, message: SendMessage) -> list[ProtocolObject]:
     responses = client.request(message)
     expected = [Ack(message.message_id, AckStatus.STORED)]
     if responses != expected:
@@ -75,21 +78,17 @@ def _completed_mailbox_cursor(responses: list[ProtocolObject]) -> int:
     return cursor
 
 
-def run_scenario(database_path: str | Path) -> ScenarioResult:
+def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     """Retrieve EA3BBB page by page using only each preceding END cursor."""
-    database = Database(database_path)
-    database.initialize()
-    core = ServerCore(message_store=MessageStore(database))
-
     clients = {
-        callsign: LocalCoreClient(core, callsign)
+        callsign: env.client(callsign)
         for callsign in ("EA3AAA", "EA3CCC", "EA3DDD")
     }
     sends = [
         _send(clients[author], message) for author, message in SUBMISSIONS
     ]
 
-    recipient = LocalCoreClient(core, RECIPIENT)
+    recipient = env.client(RECIPIENT)
     request_since = [0]
     pages = [recipient.request(GetNewMessages(request_since[0], PAGE_SIZE))]
 
@@ -133,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: mailbox_pagination.py DATABASE", file=sys.stderr)
         return 2
 
-    result = run_scenario(argv[0])
+    result = run_scenario(LocalScenarioEnvironment(argv[0]))
     print("Stored five EA3BBB messages and two interleaved mailbox messages")
     for index, (page, since) in enumerate(
         zip(result.pages, result.request_since, strict=True), start=1

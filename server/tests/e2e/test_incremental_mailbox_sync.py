@@ -7,6 +7,12 @@ import sys
 from openqsp.protocol import Ack, AckStatus, End, Message, Operation
 
 
+TOOLS_ROOT = Path(__file__).parents[3] / "tools"
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from scenario_environment import LocalScenarioEnvironment  # noqa: E402
+
 SCENARIO_PATH = (
     Path(__file__).parents[3] / "tools" / "scenarios" / "incremental_mailbox_sync.py"
 )
@@ -22,7 +28,7 @@ def _stored_ack(message_id: int) -> list[Ack]:
 
 
 def test_mailbox_sync_reuses_end_cursors_without_duplicates(tmp_path) -> None:
-    result = scenario.run_scenario(tmp_path / "node.db")
+    result = scenario.run_scenario(LocalScenarioEnvironment(tmp_path / "node.db"))
 
     assert result.initial_sends == [
         _stored_ack(scenario.MESSAGE_A.message_id),

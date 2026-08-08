@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gc
 from pathlib import Path
 import sys
 
@@ -10,7 +9,11 @@ TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import LocalCoreClient, completed_cursor  # noqa: E402
+from client_sim import completed_cursor  # noqa: E402
+from scenario_environment import (  # noqa: E402
+    LocalScenarioEnvironment,
+    ScenarioEnvironment,
+)
 from openqsp.protocol import (  # noqa: E402
     Ack,
     AckStatus,
@@ -23,10 +26,7 @@ from openqsp.protocol import (  # noqa: E402
     Message,
     Operation,
     SendMessage,
-    encode_frame,
 )
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import BulletinStore, Database, MessageStore  # noqa: E402
 
 
 SENDER = "EA3AAA"
@@ -44,39 +44,18 @@ BULLETIN = Bulletin(
 SYNC_LIMIT = 20
 
 
-def _new_node(database_path: Path):
-    database = Database(database_path)
-    database.initialize()
-    messages = MessageStore(database)
-    bulletins = BulletinStore(database)
-    core = ServerCore(message_store=messages, bulletin_store=bulletins)
-    return database, messages, bulletins, core
-
-
 def _cursor(responses, operation: Operation) -> int:
     cursor = completed_cursor(responses, operation)
     assert cursor is not None
     return cursor
 
 
-def test_milestone4_complete_local_node_workflow(tmp_path) -> None:
-    database_path = tmp_path / "milestone4.db"
-    database, messages, bulletins, core = _new_node(database_path)
-    sender = LocalCoreClient(core, SENDER)
-    recipient = LocalCoreClient(core, RECIPIENT)
-    unrelated = LocalCoreClient(core, UNRELATED)
-
-    # Bulletin publication is deliberately not a protocol operation. Validate the
-    # object with the production codec, then use the development seeding path.
-    encode_frame(BULLETIN)
-    seeded = bulletins.store_bulletin(
-        bulletin_id=BULLETIN.bulletin_id,
-        created_at=BULLETIN.created_at,
-        author=BULLETIN.author,
-        title=BULLETIN.title,
-        body=BULLETIN.body,
-    )
-    assert seeded.result.name == "STORED"
+def run_conformance_scenario(env: ScenarioEnvironment) -> None:
+    """Exercise integrated M4 behavior through the scenario seam."""
+    sender = env.client(SENDER)
+    recipient = env.client(RECIPIENT)
+    unrelated = env.client(UNRELATED)
+    env.seed_bulletin(BULLETIN)
 
     assert sender.request(MESSAGE_A) == [
         Ack(MESSAGE_A.message_id, AckStatus.STORED)
@@ -106,13 +85,11 @@ def test_milestone4_complete_local_node_workflow(tmp_path) -> None:
     ]
     assert recipient.request(GetNewMessages(0, SYNC_LIMIT)) == first_sync
 
-    # Simulate a restart while retaining only state available outside the node.
-    del sender, recipient, unrelated, core, bulletins, messages, database, first_sync
-    gc.collect()
-
-    database, messages, bulletins, core = _new_node(database_path)
-    sender = LocalCoreClient(core, SENDER)
-    recipient = LocalCoreClient(core, RECIPIENT)
+    # Restart while retaining only state available through the environment.
+    del sender, recipient, unrelated, first_sync
+    env.restart_node()
+    sender = env.client(SENDER)
+    recipient = env.client(RECIPIENT)
 
     assert recipient.request(GetNewMessages(message_cursor, SYNC_LIMIT)) == [
         End(Operation.GET_NEW_MESSAGES, 0, message_cursor, False)
@@ -154,3 +131,7 @@ def test_milestone4_complete_local_node_workflow(tmp_path) -> None:
     assert recipient.request(GetNewBulletins(bulletin_cursor, SYNC_LIMIT)) == [
         End(Operation.GET_NEW_BULLETINS, 0, bulletin_cursor, False)
     ]
+
+
+def test_milestone4_complete_local_node_workflow(tmp_path) -> None:
+    run_conformance_scenario(LocalScenarioEnvironment(tmp_path / "milestone4.db"))

@@ -11,7 +11,12 @@ TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import LocalCoreClient, completed_cursor  # noqa: E402
+from client_sim import completed_cursor  # noqa: E402
+from scenario_environment import (  # noqa: E402
+    LocalScenarioEnvironment,
+    ScenarioClient,
+    ScenarioEnvironment,
+)
 from openqsp.protocol import (  # noqa: E402
     Bulletin,
     BulletinHeader,
@@ -21,10 +26,7 @@ from openqsp.protocol import (  # noqa: E402
     GetNewBulletins,
     Operation,
     ProtocolObject,
-    encode_frame,
 )
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import BulletinStore, Database, MessageStore  # noqa: E402
 
 
 CLIENT = "EA3AAA"
@@ -56,20 +58,6 @@ class ScenarioResult:
     missing: list[ProtocolObject]
 
 
-def _seed(store: BulletinStore, bulletin: Bulletin) -> None:
-    """Use the existing validated development seeding mechanism."""
-    encode_frame(bulletin)
-    outcome = store.store_bulletin(
-        bulletin_id=bulletin.bulletin_id,
-        created_at=bulletin.created_at,
-        author=bulletin.author,
-        title=bulletin.title,
-        body=bulletin.body,
-    )
-    if outcome.result.name != "STORED":
-        raise AssertionError(f"could not seed bulletin {bulletin.bulletin_id}: {outcome}")
-
-
 def _cursor(responses: list[ProtocolObject]) -> int:
     cursor = completed_cursor(responses, Operation.GET_NEW_BULLETINS)
     if cursor is None:
@@ -77,16 +65,12 @@ def _cursor(responses: list[ProtocolObject]) -> int:
     return cursor
 
 
-def run_scenario(database_path: str | Path) -> ScenarioResult:
+def run_scenario(env: ScenarioEnvironment) -> ScenarioResult:
     """Run all M4.8 phases through the persistent production Core stack."""
-    database = Database(database_path)
-    database.initialize()
-    store = BulletinStore(database)
-    core = ServerCore(message_store=MessageStore(database), bulletin_store=store)
-    client = LocalCoreClient(core, CLIENT)
+    client = env.client(CLIENT)
 
-    _seed(store, BULLETIN_A)
-    _seed(store, BULLETIN_B)
+    env.seed_bulletin(BULLETIN_A)
+    env.seed_bulletin(BULLETIN_B)
     initial_sync = client.request(GetNewBulletins(0, SYNC_LIMIT))
     initial_cursor = _cursor(initial_sync)
 
@@ -96,7 +80,7 @@ def run_scenario(database_path: str | Path) -> ScenarioResult:
     # Retrieval deliberately follows the identifier supplied by synchronization.
     retrieved = client.request(GetBulletin(headers[0].bulletin_id))
 
-    _seed(store, BULLETIN_C)
+    env.seed_bulletin(BULLETIN_C)
     incremental_sync = client.request(GetNewBulletins(initial_cursor, SYNC_LIMIT))
     incremental_cursor = _cursor(incremental_sync)
     empty_sync = client.request(GetNewBulletins(incremental_cursor, SYNC_LIMIT))
@@ -132,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: bulletin_sync_retrieval.py DATABASE", file=sys.stderr)
         return 2
 
-    result = run_scenario(argv[0])
+    result = run_scenario(LocalScenarioEnvironment(argv[0]))
     print("Seeded bulletin A")
     print("Seeded bulletin B\n")
     _print_sync(0, result.initial_sync)
