@@ -33,16 +33,16 @@ from .errors import (
 from .models import (
     Bulletin,
     BulletinHeader,
+    Capabilities,
     End,
     Error,
     GetBulletin,
+    GetCapabilities,
     GetNewBulletins,
     GetNewMessages,
     Message,
     SendMessage,
     Stored,
-    GetCapabilities,
-    Capabilities,
 )
 
 ProtocolObject: TypeAlias = (

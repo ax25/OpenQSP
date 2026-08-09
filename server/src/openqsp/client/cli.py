@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import shlex
 from collections.abc import Sequence
 from datetime import datetime
-import shlex
-import getpass
 
 from openqsp.client.tcp import ClientError, OpenQSPClient
 from openqsp.protocol import (

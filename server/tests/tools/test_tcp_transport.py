@@ -1,10 +1,10 @@
 """Focused synchronous client transport tests."""
 
-from contextlib import contextmanager
 import socket
-import threading
-from pathlib import Path
 import sys
+import threading
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +12,7 @@ TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import (  # noqa: E402
+from client_sim import (
     ConnectionFailed,
     DevelopmentClient,
     DevelopmentHandshakeError,
@@ -20,13 +20,13 @@ from client_sim import (  # noqa: E402
     TransportError,
     TruncatedResponseError,
 )
-from openqsp.protocol import (  # noqa: E402
-    Stored,
+from openqsp.protocol import (
     End,
     GetNewMessages,
     Message,
     Operation,
     SendMessage,
+    Stored,
     encode_frame,
 )
 
@@ -88,11 +88,13 @@ def test_multiple_response_frames_are_read_through_end():
 
 
 def test_rejected_development_handshake_is_a_transport_error():
-    with _scripted_server([], handshake=b"ERROR\n") as port:
-        with pytest.raises(DevelopmentHandshakeError):
-            TcpTransport("127.0.0.1", port).exchange(
-                "BAD", encode_frame(GetNewMessages(0, 5))
-            )
+    with (
+        _scripted_server([], handshake=b"ERROR\n") as port,
+        pytest.raises(DevelopmentHandshakeError),
+    ):
+        TcpTransport("127.0.0.1", port).exchange(
+            "BAD", encode_frame(GetNewMessages(0, 5))
+        )
 
 
 @pytest.mark.parametrize("partial", [b"", b"\x01\x43", b"\x01\x43\x00\x05abc"])

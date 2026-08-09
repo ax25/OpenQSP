@@ -1,7 +1,6 @@
 from dataclasses import FrozenInstanceError, fields
 
 import pytest
-
 from openqsp.protocol.constants import (
     HEADER_SIZE,
     MAX_BULLETIN_BODY_LENGTH,

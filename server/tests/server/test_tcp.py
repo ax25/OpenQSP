@@ -3,12 +3,12 @@
 import asyncio
 
 from openqsp.protocol import (
-    Stored,
     End,
     GetNewMessages,
     Message,
     Operation,
     SendMessage,
+    Stored,
     decode_frame,
     encode_frame,
 )

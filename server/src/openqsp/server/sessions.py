@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
 import threading
 import time
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from openqsp.protocol import Message, ProtocolObject, validate_callsign
 

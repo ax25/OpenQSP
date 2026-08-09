@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import socket
 import threading
 import time
+from collections.abc import Callable
+from typing import Self
 
 from openqsp.protocol import (
     Bulletin,
-    Capabilities,
     BulletinHeader,
+    Capabilities,
     End,
     Error,
     GetBulletin,
@@ -36,7 +37,6 @@ from openqsp.transport.tcp import (
     HANDSHAKE_PREFIX,
     MAX_HANDSHAKE_SIZE,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ class OpenQSPClient:
         with self._condition:
             self._condition.notify_all()
 
-    def __enter__(self) -> OpenQSPClient:
+    def __enter__(self) -> Self:
         self.connect()
         return self
 

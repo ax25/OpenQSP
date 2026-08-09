@@ -1,7 +1,6 @@
 """Tests for mailbox-local private-message retrieval."""
 
 import pytest
-
 from openqsp.storage import (
     Database,
     InvalidCursorError,

@@ -1,7 +1,6 @@
 """Tests for bulletin synchronization and sequence lookup."""
 
 import pytest
-
 from openqsp.storage import (
     BulletinStore,
     Database,
@@ -51,7 +50,7 @@ def test_retrieval_after_restart_and_missing_lookup(tmp_path):
 
 
 def test_sequence_lookup_validation_boundaries(tmp_path):
-    database, store = create_store(tmp_path / "node.db")
+    _database, store = create_store(tmp_path / "node.db")
     add(store)
     assert store.get_bulletin(sequence=1).sequence == 1
     assert store.get_bulletin(sequence=0xFFFF_FFFF) is None

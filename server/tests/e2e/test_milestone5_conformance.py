@@ -1,16 +1,14 @@
 """M5.5 conformance workflow through the complete development TCP path."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import completed_cursor  # noqa: E402
-from scenario_environment import RemoteScenarioEnvironment  # noqa: E402
-from openqsp.protocol import (  # noqa: E402
-    Stored,
+from client_sim import completed_cursor
+from openqsp.protocol import (
     Bulletin,
     BulletinHeader,
     End,
@@ -22,8 +20,9 @@ from openqsp.protocol import (  # noqa: E402
     Message,
     Operation,
     SendMessage,
+    Stored,
 )
-
+from scenario_environment import RemoteScenarioEnvironment
 
 SENDER = "EA3AAA"
 RECIPIENT = "EA3BBB"

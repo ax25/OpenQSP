@@ -1,5 +1,4 @@
 import pytest
-
 from openqsp.protocol import codec
 from openqsp.protocol.codec import decode_frame, decode_frame_with_flags, encode_frame
 from openqsp.protocol.constants import MAX_FRAME_SIZE, Operation
@@ -11,7 +10,6 @@ from openqsp.protocol.errors import (
     UnsupportedVersionError,
 )
 from openqsp.protocol.models import BulletinHeader, GetBulletin, Message
-
 
 GET_BULLETIN_FRAME = bytes.fromhex(
     "01 04 00 04 11 12 13 14"
