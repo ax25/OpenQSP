@@ -53,6 +53,15 @@ use a stable Tier-2 endpoint and verify cross-server visibility, but neither
 Core nor this profile assumes same-server placement. RF/IGate validation is an
 environment-dependent follow-up.
 
+On APRS-IS connection loss, queued packets, pending fragment ACK correlation,
+and immediate ACK output are discarded because they belong to the lost socket.
+Bounded reassembly and completed-request replay entries remain until their TTL:
+they are keyed by full peer and transaction rather than a socket, allowing a
+radio peer to finish or safely replay a request after service reconnection.
+Neither choice changes durable Core state. The implemented socket path has
+network-free integration coverage; live APRS-IS/cross-server acceptance is
+still pending, so M7 remains active.
+
 Canonical large vectors are derived and checked with production
 `encode_frame_text`, `fragment_frame`, and `decode_frame_text`. A retry retains
 its `TTT` and APRS fragment IDs; a new request uses a new `TTT`. Neither is a

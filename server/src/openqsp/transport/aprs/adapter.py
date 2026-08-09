@@ -22,7 +22,13 @@ from openqsp.protocol import (
 )
 from openqsp.server import ServerCore
 
-from .carriage import APRSFragment, CarriageError, base36, fragment_frame, parse_fragment
+from .carriage import (
+    APRSFragment,
+    CarriageError,
+    base36,
+    fragment_frame,
+    parse_fragment,
+)
 from .state import Reassembler, ReplayCache, TransactionConflict
 
 SERVICE_CALLSIGN = "OPENQSP"
@@ -42,12 +48,19 @@ class AdapterConfig:
     max_replays: int = 256
     max_replays_per_peer: int = 16
     queue_capacity: int = 512
+    transaction_id_space: int = 36**3
+    max_activity_peers: int = 256
+    event_history_capacity: int = 512
 
     def __post_init__(self) -> None:
         if self.ack_timeout <= 0 or self.max_attempts <= 0 or self.activity_timeout <= 0:
             raise ValueError("timeouts and attempts must be positive")
         if self.min_interval < 0 or self.queue_capacity <= 0:
             raise ValueError("rate interval must be non-negative and queue bounded")
+        if not 1 <= self.transaction_id_space <= 36**3:
+            raise ValueError("transaction ID space must be between 1 and 46656")
+        if self.max_activity_peers <= 0 or self.event_history_capacity <= 0:
+            raise ValueError("activity and event-history bounds must be positive")
 
 
 @dataclass(frozen=True)
@@ -107,14 +120,57 @@ class APRSAdapter:
 
     def _allocate(self, peer: str, *, transaction: bool) -> str:
         counters = self._next_transaction if transaction else self._next_message
-        width, space = (3, 36**3) if transaction else (2, 36**2)
+        width, space = (
+            (3, self.config.transaction_id_space)
+            if transaction
+            else (2, 36**2)
+        )
+        active_transactions = self._active_transactions(peer) if transaction else set()
+        active_messages = self._active_message_ids(peer) if not transaction else set()
         for _ in range(space):
             value = counters[peer] % space
             counters[peer] = value + 1
             candidate = base36(value, width)
-            if transaction or (peer, candidate) not in self._pending:
+            if (
+                transaction
+                and candidate not in active_transactions
+                or not transaction
+                and candidate not in active_messages
+            ):
                 return candidate
         raise OverflowError("peer APRS identifier space exhausted")
+
+    def _active_transactions(self, peer: str) -> set[str]:
+        """Return bounded outbound TTTs still queued or awaiting an APRS ACK."""
+        active = {
+            item.fragment.transaction_id
+            for item in self._queue
+            if item.peer == peer
+        }
+        for (pending_peer, _), pending in self._pending.items():
+            if pending_peer != peer:
+                continue
+            try:
+                active.add(parse_fragment(pending.packet.body).transaction_id)
+            except CarriageError:
+                # Pending application packets are always fragments.  Keeping a
+                # malformed internal packet out of allocation state is safe and
+                # lets its normal retry/failure bookkeeping release it.
+                continue
+        return active
+
+    def _active_message_ids(self, peer: str) -> set[str]:
+        active = {
+            item.fragment.message_id
+            for item in self._queue
+            if item.peer == peer and item.fragment.message_id is not None
+        }
+        active.update(
+            message_id
+            for pending_peer, message_id in self._pending
+            if pending_peer == peer
+        )
+        return active
 
     def queue_frame(self, peer: str, frame: bytes, *, proactive: bool = False) -> str:
         self.validate_peer(peer)
@@ -171,8 +227,13 @@ class APRSAdapter:
         callsign = normalize_callsign(peer, "APRS source")
         responses = tuple(self.core.handle_frame(callsign, frame))
         self.replay.put(peer, fragment.transaction_id, frame, responses, now)
+        self._expire_activity(now)
+        if peer not in self._activity and len(self._activity) >= self.config.max_activity_peers:
+            oldest = min(self._activity, key=lambda item: self._activity[item][1])
+            del self._activity[oldest]
         self._activity[peer] = (callsign, now)
         self.completed_transactions.append((peer, fragment.transaction_id))
+        del self.completed_transactions[: -self.config.event_history_capacity]
         for response in responses:
             self.queue_frame(peer, response)
         return "completed"
@@ -186,6 +247,7 @@ class APRSAdapter:
                 continue
             if pending.attempts >= self.config.max_attempts:
                 self.failed_packets.append(pending.packet)
+                del self.failed_packets[: -self.config.event_history_capacity]
                 del self._pending[key]
             elif now - self._last_send[pending.packet.destination] >= self.config.min_interval:
                 pending.attempts += 1
@@ -205,12 +267,23 @@ class APRSAdapter:
                 packets.append(packet)
         self.reassembly.expire(now)
         self.replay.expire(now)
+        self._expire_activity(now)
         return packets
 
     def is_active(self, peer: str, *, now: float | None = None) -> bool:
         now = self.clock() if now is None else now
         state = self._activity.get(peer)
-        return state is not None and now - state[1] < self.config.activity_timeout
+        if state is None:
+            return False
+        if now - state[1] >= self.config.activity_timeout:
+            del self._activity[peer]
+            return False
+        return True
+
+    def _expire_activity(self, now: float) -> None:
+        for peer, (_, active_at) in tuple(self._activity.items()):
+            if now - active_at >= self.config.activity_timeout:
+                del self._activity[peer]
 
     def _on_message(self, message: Message) -> None:
         now = self.clock()
@@ -230,7 +303,12 @@ class APRSAdapter:
         self.core.remove_message_listener(self._on_message)
 
     def connection_lost(self) -> None:
-        """Deterministically discard delivery state tied to a lost APRS-IS link."""
+        """Discard link delivery state that cannot be ACK-correlated after reconnect.
+
+        Reassembly and replay are deliberately retained: both are peer/TTT
+        scoped, TTL bounded, independent of one APRS-IS socket, and let a peer
+        safely finish or replay a request after the service reconnects.
+        """
         self._queue.clear()
         self._pending.clear()
         self._immediate.clear()

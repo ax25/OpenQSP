@@ -271,7 +271,7 @@ Acceptance criteria:
 
 ## 9. Milestone 7 - APRS transport profile and simulator
 
-**Status: complete**
+**Status: active**
 
 Objective: define, simulate and implement OpenQSP carriage over APRS after the node core and shared session semantics are stable.
 
@@ -287,9 +287,11 @@ Implemented profile capabilities:
 - proactive delivery while the user is locally active.
 
 `tools/aprs_sim.py` transforms between complete Core frames and production APRS
-carriage with a virtual clock and deterministic faults. The APRS-IS line,
-verified-login, configuration, and reconnect path is independently testable;
-live RF remains an environment-dependent validation boundary.
+carriage with a virtual clock and deterministic faults. Local/simulator
+conformance and the APRS-IS production code path are implemented. Live
+APRS-IS, including cross-server propagation, remains pending external
+validation before M7 can close. Live RF remains a later field-validation
+boundary and does not block automated development.
 
 The simulator should support controlled fault injection for at least:
 

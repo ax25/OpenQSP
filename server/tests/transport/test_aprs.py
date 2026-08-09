@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import pytest
-
 from openqsp.protocol import GetCapabilities, GetNewMessages, encode_frame
 from openqsp.server import ServerCore
-from openqsp.transport.aprs import APRSAdapter, AdapterConfig, OutboundPacket
+from openqsp.transport.aprs import AdapterConfig, APRSAdapter, OutboundPacket
 from openqsp.transport.aprs.aprsis import (
     APRSISConfig,
     format_packet,

@@ -6,7 +6,7 @@ import base64
 import re
 from dataclasses import dataclass
 
-from openqsp.protocol import decode_frame
+from openqsp.protocol import decode_frame_with_flags
 from openqsp.protocol.constants import MAX_FRAME_SIZE
 
 DATA_CHUNK_SIZE = 48
@@ -43,7 +43,7 @@ def encode_frame_text(frame: bytes) -> str:
         raise TypeError("frame must be bytes")
     if not frame or len(frame) > MAX_FRAME_SIZE:
         raise CarriageError("frame size is outside the OpenQSP bounds")
-    decode_frame(frame)
+    decode_frame_with_flags(frame)
     return base64.urlsafe_b64encode(frame).rstrip(b"=").decode("ascii")
 
 
@@ -56,7 +56,7 @@ def decode_frame_text(text: str) -> bytes:
         frame = base64.b64decode(
             text + "=" * (-len(text) % 4), altchars=b"-_", validate=True
         )
-        decode_frame(frame)
+        decode_frame_with_flags(frame)
     except Exception as error:
         raise CarriageError("invalid OpenQSP frame carriage") from error
     return frame

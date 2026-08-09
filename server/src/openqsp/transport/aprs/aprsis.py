@@ -7,12 +7,12 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .adapter import APRSAdapter, OutboundPacket, SERVICE_CALLSIGN
+from .adapter import SERVICE_CALLSIGN, APRSAdapter, OutboundPacket
 
 DEFAULT_HOST = "rotate.aprs2.net"
 DEFAULT_PORT = 14580
 _PACKET_RE = re.compile(r"([^>]+)>[^:]+::(.{9}):(.*)")
-_LOGRESP_RE = re.compile(r"# logresp ([^ ]+) (verified|unverified)(?:,.*)?", re.I)
+_LOGRESP_RE = re.compile(r"# logresp ([^ ]+) (verified|unverified)(?:,.*)?", re.IGNORECASE)
 
 
 @dataclass(frozen=True)

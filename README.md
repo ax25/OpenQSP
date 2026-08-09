@@ -158,7 +158,11 @@ state, proactive delivery, deterministic simulation, and an APRS-IS path. APRS
 identity is transport-asserted, not cryptographically authenticated. The
 end-user application remains future work.
 
-The next active milestone is the M8 user application.
+M7 remains the active milestone. Local and deterministic simulator conformance
+is implemented, as is the production APRS-IS code path. A live APRS-IS
+cross-server acceptance exercise is still required before M7 closes. RF/IGate
+field validation remains a later activity and does not block automated
+development.
 
 ---
 
@@ -171,7 +175,7 @@ The next active milestone is the M8 user application.
 - [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
 - [x] **Milestone 5 — Internet transport**
 - [x] **Milestone 6 — Production identity, sessions and node capabilities**
-- [x] **Milestone 7 — APRS transport profile and simulator**
+- [ ] **Milestone 7 — APRS transport profile and simulator** *(active; live APRS-IS acceptance pending)*
 - [ ] **Milestone 8 — User application**
 
 The first minimum server release is defined by completion of Milestones 1 through 4.
