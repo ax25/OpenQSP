@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 import socket
 import threading
 import time
@@ -35,6 +36,8 @@ from openqsp.transport.tcp import (
     HANDSHAKE_PREFIX,
     MAX_HANDSHAKE_SIZE,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ClientError(Exception):
@@ -334,8 +337,9 @@ class OpenQSPClient:
                     try:
                         handler(obj)
                     except Exception:
-                        # A UI callback must never kill transport processing.
-                        pass
+                        # A UI callback must never kill transport processing,
+                        # but callback defects must remain visible to callers.
+                        logger.exception("event handler failed for unsolicited frame")
         except (OSError, ConnectionClosedError) as error:
             if self._socket is not None:
                 self._set_failure(ConnectionClosedError(str(error)))

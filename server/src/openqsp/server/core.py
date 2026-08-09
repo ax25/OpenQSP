@@ -7,8 +7,9 @@ of connections or sessions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
+import logging
 
 from openqsp.protocol import (
     Bulletin,
@@ -46,6 +47,8 @@ from openqsp.storage import (
     SequenceExhaustedError,
     StorageIntegrityError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -184,8 +187,9 @@ class ServerCore:
             try:
                 listener(message)
             except Exception:
-                # Push is best effort and must never change durable acceptance.
-                continue
+                # Push is best effort and must never change durable acceptance,
+                # but callback defects must remain visible to operators.
+                logger.exception("message listener failed after durable acceptance")
         return [Stored()]
 
     def _handle_get_new_messages(
