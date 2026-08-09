@@ -126,6 +126,55 @@ def test_background_reader_delivers_unsolicited_protocol_event():
     asyncio.run(exercise())
 
 
+def test_event_handler_failure_is_logged_without_stopping_reader(caplog):
+    received = []
+
+    def handler(message):
+        received.append(message)
+        if len(received) == 1:
+            raise RuntimeError("broken UI callback")
+
+    async def peer(reader, writer):
+        assert await reader.readline() == b"CALLSIGN EA3BBB\n"
+        writer.write(b"OK\n")
+        writer.write(
+            encode_frame(
+                Message(7, 9, "EA3AAA", "EA3BBB", "first"), unsolicited=True
+            )
+        )
+        writer.write(
+            encode_frame(
+                Message(8, 10, "EA3AAA", "EA3BBB", "second"), unsolicited=True
+            )
+        )
+        await writer.drain()
+        await asyncio.sleep(0.2)
+        writer.close()
+        await writer.wait_closed()
+
+    async def exercise():
+        server = await asyncio.start_server(peer, "127.0.0.1", 0)
+        client = OpenQSPClient(
+            "127.0.0.1",
+            server.sockets[0].getsockname()[1],
+            allow_development_auth=True,
+            event_handler=handler,
+        )
+        await asyncio.to_thread(client.connect)
+        await asyncio.to_thread(client.authenticate, "EA3BBB")
+        for _ in range(20):
+            if len(received) == 2:
+                break
+            await asyncio.sleep(0.01)
+        assert [message.sequence for message in received] == [7, 8]
+        assert "OpenQSP event handler failed" in caplog.text
+        await asyncio.to_thread(client.close)
+        server.close()
+        await server.wait_closed()
+
+    asyncio.run(exercise())
+
+
 async def _read_frame(reader):
     header = await reader.readexactly(4)
     return header + await reader.readexactly(header[3])

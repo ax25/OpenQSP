@@ -9,9 +9,14 @@ from openqsp.client import AuthenticationError, OpenQSPClient
 from openqsp.protocol import (
     Capabilities,
     Capability,
+    GetNewMessages,
     IMPLEMENTED_CAPABILITIES,
     Message,
     PROTOCOL_VERSION,
+    SendMessage,
+    Stored,
+    decode_frame,
+    encode_frame,
 )
 from openqsp.server import ServerCore
 from openqsp.server.tcp import TCPServer
@@ -118,6 +123,27 @@ def test_production_two_user_push_capabilities_restart(tmp_path):
             await asyncio.to_thread(recipient.close)
 
     asyncio.run(exercise())
+
+
+def test_listener_failure_is_logged_after_durable_acceptance(tmp_path, caplog):
+    _, _, core = _node(tmp_path / "node.db")
+
+    def broken_listener(message):
+        raise RuntimeError(f"cannot push message {message.sequence}")
+
+    core.add_message_listener(broken_listener)
+    response = core.handle_frame(
+        "EA3AAA", encode_frame(SendMessage(1234, "EA3BBB", "still durable"))
+    )
+
+    assert [decode_frame(frame) for frame in response] == [Stored()]
+    messages = core.handle_frame(
+        "EA3BBB", encode_frame(GetNewMessages(0, 5))
+    )
+    assert decode_frame(messages[0]) == Message(
+        1, 1234, "EA3AAA", "EA3BBB", "still durable"
+    )
+    assert "message listener failed after durable acceptance" in caplog.text
 
 
 def test_production_auth_rejects_all_invalid_inputs_equally(tmp_path):
