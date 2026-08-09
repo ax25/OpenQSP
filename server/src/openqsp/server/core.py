@@ -8,14 +8,18 @@ of connections or sessions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
+import logging
 
 from openqsp.protocol import (
     Bulletin,
+    Capabilities,
     BulletinHeader,
     End,
     Error,
     ErrorCode,
     GetBulletin,
+    GetCapabilities,
     GetNewBulletins,
     GetNewMessages,
     Message,
@@ -23,6 +27,8 @@ from openqsp.protocol import (
     ProtocolObject,
     SendMessage,
     Stored,
+    IMPLEMENTED_CAPABILITIES,
+    PROTOCOL_VERSION,
     decode_frame,
     encode_frame,
     validate_callsign,
@@ -41,6 +47,9 @@ from openqsp.storage import (
     SequenceExhaustedError,
     StorageIntegrityError,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -65,6 +74,16 @@ class ServerCore:
     ) -> None:
         self._message_store = message_store
         self._bulletin_store = bulletin_store
+        self._message_listeners: list[Callable[[Message], object]] = []
+
+    def add_message_listener(self, listener: Callable[[Message], object]) -> None:
+        self._message_listeners.append(listener)
+
+    def remove_message_listener(self, listener: Callable[[Message], object]) -> None:
+        try:
+            self._message_listeners.remove(listener)
+        except ValueError:
+            pass
 
     def handle_frame(
         self, authenticated_callsign: str, frame_bytes: bytes
@@ -102,6 +121,8 @@ class ServerCore:
             return self._handle_get_new_bulletins(context, request)
         if isinstance(request, GetBulletin):
             return self._handle_get_bulletin(context, request)
+        if isinstance(request, GetCapabilities):
+            return [Capabilities(PROTOCOL_VERSION, int(IMPLEMENTED_CAPABILITIES))]
 
         return [
             Error(
@@ -137,7 +158,7 @@ class ServerCore:
             ]
 
         try:
-            self._message_store.store_message(
+            sequence = self._message_store.store_message(
                 created_at=request.created_at,
                 author=author,
                 recipient=request.recipient,
@@ -160,6 +181,16 @@ class ServerCore:
                 )
             ]
 
+        message = Message(
+            sequence, request.created_at, author, request.recipient, request.body
+        )
+        for listener in tuple(self._message_listeners):
+            try:
+                listener(message)
+            except Exception:
+                # Push is best effort and must never change durable acceptance,
+                # but unexpected adapter failures must remain observable.
+                logger.exception("message listener failed after durable acceptance")
         return [Stored()]
 
     def _handle_get_new_messages(
@@ -243,9 +274,7 @@ class ServerCore:
             ]
 
         try:
-            validate_callsign(
-                context.authenticated_callsign, "authenticated_callsign"
-            )
+            validate_callsign(context.authenticated_callsign, "authenticated_callsign")
         except InvalidFieldError:
             return [
                 Error(
@@ -309,9 +338,7 @@ class ServerCore:
             ]
 
         try:
-            validate_callsign(
-                context.authenticated_callsign, "authenticated_callsign"
-            )
+            validate_callsign(context.authenticated_callsign, "authenticated_callsign")
         except InvalidFieldError:
             return [
                 Error(
@@ -365,6 +392,8 @@ class ServerCore:
             return Operation.STORED
         if isinstance(value, Error):
             return Operation.ERROR
+        if isinstance(value, Capabilities):
+            return Operation.CAPABILITIES
         raise TypeError(f"unclassified protocol object: {type(value).__name__}")
 
     @staticmethod

@@ -41,12 +41,14 @@ def test_operation_codes() -> None:
         "GET_NEW_MESSAGES": 0x02,
         "GET_NEW_BULLETINS": 0x03,
         "GET_BULLETIN": 0x04,
+        "GET_CAPABILITIES": 0x05,
         "MESSAGE": 0x40,
         "BULLETIN_HEADER": 0x41,
         "BULLETIN": 0x42,
         "END": 0x43,
         "STORED": 0x44,
         "ERROR": 0x45,
+        "CAPABILITIES": 0x46,
     }
 
 

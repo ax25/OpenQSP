@@ -42,7 +42,7 @@ async def _read_frame(reader: asyncio.StreamReader) -> bytes:
 
 def test_server_accepts_valid_handshake_and_rejects_invalid_one(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             reader, writer = await _connect(server)
             writer.close()
             await writer.wait_closed()
@@ -64,7 +64,7 @@ def test_server_accepts_valid_handshake_and_rejects_invalid_one(tmp_path):
 
 def test_complete_request_reaches_real_core_and_response_returns(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             reader, writer = await _connect(server)
             request = encode_frame(SendMessage(20, "N0CALL", "hello"))
             writer.write(request)
@@ -78,7 +78,7 @@ def test_complete_request_reaches_real_core_and_response_returns(tmp_path):
 
 def test_maximum_size_valid_request_does_not_stall_stream_reader(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             reader, writer = await _connect(server)
             request = encode_frame(
                 SendMessage(21,
@@ -104,7 +104,7 @@ def test_maximum_size_valid_request_does_not_stall_stream_reader(tmp_path):
 
 def test_fragmented_frame_is_reassembled(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             reader, writer = await _connect(server)
             frame = encode_frame(GetNewMessages(0, 5))
             for byte in frame:
@@ -122,7 +122,7 @@ def test_fragmented_frame_is_reassembled(tmp_path):
 
 def test_coalesced_and_sequential_frames_are_processed_in_order(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             reader, writer = await _connect(server)
             first = encode_frame(SendMessage(10, "N0CALL", "one"))
             second = encode_frame(SendMessage(11, "N0CALL", "two"))
@@ -153,7 +153,7 @@ def test_two_clients_are_served_concurrently(tmp_path):
         return response
 
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             responses = await asyncio.gather(
                 request(server, "K1ABC"), request(server, "N0CALL")
             )
@@ -167,7 +167,7 @@ def test_two_clients_are_served_concurrently(tmp_path):
 
 def test_partial_disconnect_does_not_affect_another_client(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             _, partial_writer = await _connect(server)
             partial_writer.write(encode_frame(GetNewMessages(0, 5))[:6])
             await partial_writer.drain()
@@ -186,7 +186,7 @@ def test_partial_disconnect_does_not_affect_another_client(tmp_path):
 
 def test_state_survives_disconnect_and_reconnect_with_same_stores(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             _, sender = await _connect(server, "K1ABC")
             sender.write(encode_frame(SendMessage(100, "N0CALL", "durable")))
             await sender.drain()
@@ -213,7 +213,7 @@ def test_transport_forwards_without_decoding_or_operation_knowledge():
             return [b"\x01\x7f\x00\x00"]
 
     async def exercise():
-        server = TCPServer(RecordingCore(), port=0)
+        server = TCPServer(RecordingCore(), port=0, allow_development_auth=True)
         async with server:
             reader, writer = await _connect(server)
             opaque_frame = b"\x01\x7f\x00\x03abc"

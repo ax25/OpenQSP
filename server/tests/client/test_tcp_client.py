@@ -10,6 +10,7 @@ from openqsp.protocol import (
     End,
     Error,
     ErrorCode,
+    Capabilities,
     Message,
     Operation,
     decode_frame,
@@ -31,7 +32,9 @@ def _core(path):
 
 async def _client(server, callsign, **kwargs):
     port = server.sockets[0].getsockname()[1]
-    client = OpenQSPClient("127.0.0.1", port, timeout=2, **kwargs)
+    client = OpenQSPClient(
+        "127.0.0.1", port, timeout=2, allow_development_auth=True, **kwargs
+    )
     await asyncio.to_thread(client.connect)
     await asyncio.to_thread(client.authenticate, callsign)
     return client
@@ -39,7 +42,7 @@ async def _client(server, callsign, **kwargs):
 
 def test_connect_authenticate_send_retrieve_and_clean_disconnect(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             sender = await _client(server, "EA3AAA")
             recipient = await _client(server, "EA3BBB")
             assert sender.connected and sender.authenticated
@@ -70,14 +73,14 @@ def test_connect_authenticate_send_retrieve_and_clean_disconnect(tmp_path):
 
 def test_invalid_callsign_is_rejected_by_local_validation(tmp_path):
     async def exercise():
-        async with TCPServer(_core(tmp_path / "node.db"), port=0) as server:
+        async with TCPServer(_core(tmp_path / "node.db"), port=0, allow_development_auth=True) as server:
             port = server.sockets[0].getsockname()[1]
-            client = OpenQSPClient("127.0.0.1", port)
+            client = OpenQSPClient("127.0.0.1", port, allow_development_auth=True)
             await asyncio.to_thread(client.connect)
             try:
                 await asyncio.to_thread(client.authenticate, "lowercase")
             except AuthenticationError as error:
-                assert "uppercase" in str(error)
+                assert "number" in str(error)
             else:
                 raise AssertionError("authentication unexpectedly succeeded")
             client.close()
@@ -106,7 +109,7 @@ def test_background_reader_delivers_unsolicited_protocol_event():
     async def exercise():
         server = await asyncio.start_server(peer, "127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
-        client = OpenQSPClient("127.0.0.1", port, event_handler=received.append)
+        client = OpenQSPClient("127.0.0.1", port, allow_development_auth=True, event_handler=received.append)
         await asyncio.to_thread(client.connect)
         await asyncio.to_thread(client.authenticate, "EA3BBB")
         for _ in range(20):
@@ -116,6 +119,55 @@ def test_background_reader_delivers_unsolicited_protocol_event():
         expected = Message(7, 9, "EA3AAA", "EA3BBB", "pushed")
         assert received == [expected]
         assert client.get_events() == [expected]
+        await asyncio.to_thread(client.close)
+        server.close()
+        await server.wait_closed()
+
+    asyncio.run(exercise())
+
+
+def test_event_handler_failure_is_logged_without_stopping_reader(caplog):
+    received = []
+
+    def handler(message):
+        received.append(message)
+        if len(received) == 1:
+            raise RuntimeError("broken UI callback")
+
+    async def peer(reader, writer):
+        assert await reader.readline() == b"CALLSIGN EA3BBB\n"
+        writer.write(b"OK\n")
+        writer.write(
+            encode_frame(
+                Message(7, 9, "EA3AAA", "EA3BBB", "first"), unsolicited=True
+            )
+        )
+        writer.write(
+            encode_frame(
+                Message(8, 10, "EA3AAA", "EA3BBB", "second"), unsolicited=True
+            )
+        )
+        await writer.drain()
+        await asyncio.sleep(0.2)
+        writer.close()
+        await writer.wait_closed()
+
+    async def exercise():
+        server = await asyncio.start_server(peer, "127.0.0.1", 0)
+        client = OpenQSPClient(
+            "127.0.0.1",
+            server.sockets[0].getsockname()[1],
+            allow_development_auth=True,
+            event_handler=handler,
+        )
+        await asyncio.to_thread(client.connect)
+        await asyncio.to_thread(client.authenticate, "EA3BBB")
+        for _ in range(20):
+            if len(received) == 2:
+                break
+            await asyncio.sleep(0.01)
+        assert [message.sequence for message in received] == [7, 8]
+        assert "OpenQSP event handler failed" in caplog.text
         await asyncio.to_thread(client.close)
         server.close()
         await server.wait_closed()
@@ -146,6 +198,7 @@ async def _run_interleaving_peer(peer, operation):
         "127.0.0.1",
         server.sockets[0].getsockname()[1],
         timeout=2,
+        allow_development_auth=True,
         event_handler=received.append,
     )
     await asyncio.to_thread(client.connect)
@@ -269,12 +322,15 @@ def test_cli_command_parsing_and_usage():
         connected = True
         callsign = "EA3AAA"
 
+        def get_capabilities(self):
+            return Capabilities(1, 15)
+
     session = CommandSession(Client())
     assert session.execute("status") == (
         True,
         "Connected: yes\nAuthenticated: EA3AAA\nServer: node.example:8023",
     )
-    assert "SEND_MESSAGE" in session.execute("services")[1]
+    assert "PRIVATE_MESSAGING" in session.execute("services")[1]
     assert session.execute("send EA3BBB")[1].startswith("Usage:")
     assert session.execute("unknown")[1].startswith("Unknown command:")
     assert session.execute("quit") == (False, "")

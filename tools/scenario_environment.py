@@ -105,7 +105,7 @@ class RemoteScenarioEnvironment:
         self._core = ServerCore(
             message_store=self._messages, bulletin_store=self._bulletins
         )
-        self._server = TCPServer(self._core, host="127.0.0.1", port=self._port)
+        self._server = TCPServer(self._core, host="127.0.0.1", port=self._port, allow_development_auth=True)
         asyncio.run_coroutine_threadsafe(self._server.start(), self._loop).result()
         self._port = self._server.sockets[0].getsockname()[1]
 

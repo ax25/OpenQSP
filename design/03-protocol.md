@@ -497,3 +497,9 @@ The following remain outside version 0.1 or require a later extension:
 - cryptographic signatures and end-to-end encryption;
 - a richer international callsign grammar;
 - Unicode normalization rules.
+
+## M6 capability discovery
+
+An authenticated client sends `GET_CAPABILITIES` (`0x05`) with an empty payload. The node returns exactly one `CAPABILITIES` (`0x46`) payload: one `u8` protocol version followed by a big-endian `u32` capability bit set. Version 0.1 defines `0x00000001` private messaging, `0x00000002` bulletin listing, `0x00000004` bulletin retrieval, and `0x00000008` proactive private-message delivery. Unknown bits must be ignored by clients. The canonical frames are `01 05 00 00` and `01 46 00 05 01 00 00 00 0F`.
+
+A proactive private message is the existing `MESSAGE` response with the common-header `UNSOLICITED` flag (`0x01`). Unsolicited frames are events, never members or terminators of the active request response.

@@ -30,6 +30,17 @@ class GetBulletin:
 
 
 @dataclass(frozen=True)
+class GetCapabilities:
+    pass
+
+
+@dataclass(frozen=True)
+class Capabilities:
+    protocol_version: int
+    capabilities: int
+
+
+@dataclass(frozen=True)
 class Message:
     sequence: int
     created_at: int

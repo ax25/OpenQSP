@@ -256,3 +256,7 @@ The following are out of scope for version 1 or deferred to later specifications
 - node-to-node synchronization;
 - binary encoding;
 - maximum private-message size.
+
+## Capability discovery (M6)
+
+`GET_CAPABILITIES` is an authenticated, transport-independent request returning one deterministic `CAPABILITIES` response. The returned protocol version and bit set allow clients to enable private messaging, bulletin listing/retrieval, and proactive message display only when implemented. Unsupported operation codes deterministically produce the existing `UNKNOWN_OPERATION` error; authorization, invalid fields, cursors, missing bulletins, and rejected requests retain their documented error codes.

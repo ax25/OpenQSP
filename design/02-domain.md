@@ -161,3 +161,7 @@ The following concepts are not part of the initial domain:
 - node-to-node synchronization.
 
 They may be introduced later only when a concrete protocol or product requirement justifies them.
+
+## Runtime identity clarification (M6)
+
+An account is the persistent normalized base-callsign identity. An authenticated session is ephemeral runtime state and is deliberately not a v0.1 persistent domain object. TCP disconnect removes its session and presence without changing its account or mailbox.

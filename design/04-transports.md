@@ -286,3 +286,9 @@ The following remain to be validated separately:
 ## 4. Future transports
 
 Packet, LoRa, serial, Bluetooth and other transports may define their own connection, activity and delivery policies while carrying the same OpenQSP application frames.
+
+## Production TCP authentication and presence (M6)
+
+A production TCP connection begins with one bounded UTF-8 line, `AUTH <callsign> <password>\n` (maximum 256 bytes). Success returns `OK\n`; every malformed, unknown-user, or wrong-password attempt returns `ERROR\n` and closes. Core frames are not accepted before success. The historical `CALLSIGN` exchange is disabled by default and exists only through the explicit `allow_development_auth` test option.
+
+A successfully authenticated connection creates an ACTIVE session. Every valid Core request and successful push refreshes activity. A session remains ACTIVE until disconnect, authentication-bound connection failure, or node shutdown; M6 retains no inactive session. All active sessions for a recipient get best-effort unsolicited `MESSAGE` delivery. Failure never deletes durable mail, and registry locks are not held during network writes. Normal mailbox synchronization is authoritative.

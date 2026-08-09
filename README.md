@@ -137,7 +137,7 @@ The detailed implementation roadmap is maintained in [`design/05-roadmap.md`](de
 
 ✅ **Minimum Node Core and Development TCP Transport Implemented — OpenQSP Core v0.1**
 
-The design baseline and Milestones 1 through 5 are complete. The version 0.1 minimum node supports both local Core execution and development TCP Internet transport.
+The design baseline and Milestones 1 through 6 are complete. The version 0.1 minimum node supports both local Core execution and development TCP Internet transport.
 
 Currently implemented:
 
@@ -152,9 +152,9 @@ Currently implemented:
 - a TCP server and remote client transport supporting all four v0.1 client operations through production codec, Core, and storage paths;
 - persistent mailbox and bulletin state, cursors, and sequence allocation across TCP reconnects and full node restarts.
 
-The TCP connection's `CALLSIGN` handshake is **development-only identification, not production authentication**. This implementation is not a production-secure deployment: production authentication, authenticated sessions, server push, ACTIVE/INACTIVE presence, capability discovery, APRS and an end-user application remain future work.
+Normal TCP access uses persistent callsign accounts, password authentication, transport-independent ACTIVE sessions, safe unsolicited private-message delivery, and machine-readable capability discovery. APRS and the end-user application remain future work.
 
-The next active milestone is production identity, sessions and node capability discovery. APRS transport work follows once those shared transport-independent semantics are stable.
+The next active milestone is the M7 APRS transport profile and simulator.
 
 ---
 
@@ -166,7 +166,7 @@ The next active milestone is production identity, sessions and node capability d
 - [x] **Milestone 3 — Minimum server core**
 - [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
 - [x] **Milestone 5 — Internet transport**
-- [ ] **Milestone 6 — Production identity, sessions and node capabilities**
+- [x] **Milestone 6 — Production identity, sessions and node capabilities**
 - [ ] **Milestone 7 — APRS transport profile and simulator**
 - [ ] **Milestone 8 — User application**
 
@@ -217,4 +217,10 @@ And another:
 $ openqsp-client --host 127.0.0.1 --port 8000 --callsign EA3BBB
 ```
 
-The reference client uses the current development-only callsign handshake and is intended for laboratory testing, not production authentication.
+The reference client uses production callsign-and-password authentication and exposes capability discovery and unsolicited events.
+
+## Production identity and offline policy (M6)
+
+The node now uses persistent normalized callsign accounts and password authentication, transport-independent active sessions, best-effort unsolicited private-message delivery, and capability discovery. Provision an account with `openqsp-server --database openqsp.db --create-account EA3AAA 'password'`; connect with `openqsp-client --callsign EA3AAA` and enter the password securely.
+
+A previously configured future client must be able to open without Internet and inspect locally cached state. Node operations remain pending or unavailable until connectivity and server authentication return. Local application access is not server authentication. No credential/token cache semantics are implied; any future cache requires an explicit security design. APRS authentication is deferred to M7. Reconnection and reauthentication resolve to the same persistent base-callsign account and mailbox.

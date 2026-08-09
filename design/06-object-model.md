@@ -149,3 +149,7 @@ Out of scope:
 - synchronized read state;
 - permissions beyond basic authenticated authorship;
 - encryption and signatures.
+
+## M6 identity boundary
+
+One persistent account maps to one normalized base callsign. Credentials are separate storage metadata, not fields of `Message` or `Bulletin`. Runtime sessions and presence are ephemeral service state, not persistent objects, and therefore do not change mailbox-local or node-local sequence identity.

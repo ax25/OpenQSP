@@ -387,3 +387,7 @@ The following storage concerns are intentionally deferred:
 - replication and high availability.
 
 They must not be added to the minimal schema unless another approved design document first defines their protocol and domain semantics.
+
+## Schema version 3: accounts
+
+Migration 3 adds the independent `accounts(callsign, password_hash, created_at)` table without modifying messages, bulletins, or their sequence allocators. Callsigns are canonical primary keys. Passwords use per-account random 128-bit salts and PBKDF2-HMAC-SHA256 with 600,000 iterations and a 256-bit derived key. Verification uses constant-time digest comparison and a dummy derivation for unknown accounts. Provisioning is an administrative CLI action; there is no network self-registration.

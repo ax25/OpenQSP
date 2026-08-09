@@ -25,10 +25,12 @@ from openqsp.protocol.constants import (  # noqa: E402
 from openqsp.protocol.errors import ProtocolError  # noqa: E402
 from openqsp.protocol.models import (  # noqa: E402
     Bulletin,
+    Capabilities,
     BulletinHeader,
     End,
     Error,
     GetBulletin,
+    GetCapabilities,
     GetNewBulletins,
     GetNewMessages,
     Message,
@@ -64,6 +66,7 @@ def parse_integer(value: str) -> int:
 
 def enum_parser(enum_type: type[EnumType]) -> Callable[[str], EnumType]:
     """Build a case-insensitive argparse converter for an IntEnum."""
+
     def parse(value: str) -> EnumType:
         try:
             return enum_type[value.upper()]
@@ -93,7 +96,9 @@ def parse_boolean(value: str) -> bool:
 
 def _add_arguments(parser: argparse.ArgumentParser, *names: str) -> None:
     for name in names:
-        parser.add_argument(f"--{name.replace('_', '-')}", required=True, type=parse_integer)
+        parser.add_argument(
+            f"--{name.replace('_', '-')}", required=True, type=parse_integer
+        )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -118,6 +123,11 @@ def _build_parser() -> argparse.ArgumentParser:
     get_bulletin = operations.add_parser("GET_BULLETIN")
     _add_arguments(get_bulletin, "sequence")
 
+    operations.add_parser("GET_CAPABILITIES")
+
+    capabilities = operations.add_parser("CAPABILITIES")
+    _add_arguments(capabilities, "protocol_version", "capabilities")
+
     message = operations.add_parser("MESSAGE")
     _add_arguments(message, "sequence", "created_at")
     for name in ("author", "recipient", "body"):
@@ -141,7 +151,9 @@ def _build_parser() -> argparse.ArgumentParser:
     operations.add_parser("STORED")
 
     error = operations.add_parser("ERROR")
-    error.add_argument("--request-operation", required=True, type=parse_request_operation)
+    error.add_argument(
+        "--request-operation", required=True, type=parse_request_operation
+    )
     error.add_argument("--error-code", required=True, type=enum_parser(ErrorCode))
     error.add_argument("--detail", required=True)
     return parser
@@ -156,6 +168,8 @@ def build_model(args: argparse.Namespace) -> object:
         "GET_NEW_MESSAGES": GetNewMessages,
         "GET_NEW_BULLETINS": GetNewBulletins,
         "GET_BULLETIN": GetBulletin,
+        "GET_CAPABILITIES": GetCapabilities,
+        "CAPABILITIES": Capabilities,
         "MESSAGE": Message,
         "BULLETIN_HEADER": BulletinHeader,
         "BULLETIN": Bulletin,
@@ -164,7 +178,9 @@ def build_model(args: argparse.Namespace) -> object:
         "ERROR": Error,
     }
     model_type = model_types[operation]
-    return model_type(**{field.name: values[field.name] for field in fields(model_type)})
+    return model_type(
+        **{field.name: values[field.name] for field in fields(model_type)}
+    )
 
 
 def _display_value(value: object) -> str:
@@ -179,7 +195,9 @@ def _display_value(value: object) -> str:
 
 def print_model(model: object, frame: bytes) -> None:
     """Print a stable human-readable view using the codec's decoded model."""
-    canonical = encode_frame(model)  # Also obtains the operation without a parallel map.
+    canonical = encode_frame(
+        model
+    )  # Also obtains the operation without a parallel map.
     operation = Operation(canonical[1])
     print(f"Operation: {operation.name}")
     print(f"Frame size: {len(frame)} bytes")

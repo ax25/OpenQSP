@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping, Sequence
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 3
 
 # OpenQSP object IDs and synchronization sequences are unsigned 64-bit values,
 # while SQLite INTEGER is signed. Both are stored as exactly eight big-endian
@@ -191,7 +191,22 @@ _MIGRATION_2 = (
     "DROP TABLE sequences",
 )
 
-MIGRATIONS: Mapping[int, Sequence[str]] = {1: _MIGRATION_1, 2: _MIGRATION_2}
+_MIGRATION_3 = (
+    """
+    CREATE TABLE accounts (
+        callsign TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+            CHECK(typeof(created_at) = 'integer' AND created_at >= 0)
+    ) WITHOUT ROWID
+    """,
+)
+
+MIGRATIONS: Mapping[int, Sequence[str]] = {
+    1: _MIGRATION_1,
+    2: _MIGRATION_2,
+    3: _MIGRATION_3,
+}
 
 
 def migrate(
