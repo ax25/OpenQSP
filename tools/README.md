@@ -319,3 +319,7 @@ tools/scenarios/multi_user_private_message.py
 
 They use the production protocol codec directly; the client simulator also
 uses the production server core and persistent stores without a network.
+
+## M6 authenticated reference access
+
+The installed `openqsp-client` is the production-stack reference client. Provision with `openqsp-server --database NODE.db --create-account CALLSIGN PASSWORD`, run the server, then authenticate with `openqsp-client --callsign CALLSIGN`. Its `services` command performs `GET_CAPABILITIES`, and pushed private messages are displayed as unsolicited events. The scenario harness retains the legacy callsign exchange only via the server's explicit test-only switch.

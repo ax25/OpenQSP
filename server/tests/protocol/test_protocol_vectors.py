@@ -8,10 +8,12 @@ from openqsp.protocol.errors import (
 )
 from openqsp.protocol.models import (
     Bulletin,
+    Capabilities,
     BulletinHeader,
     End,
     Error,
     GetBulletin,
+    GetCapabilities,
     GetNewBulletins,
     GetNewMessages,
     Message,
@@ -33,6 +35,8 @@ CANONICAL_VECTORS = [
     ("01 42 00 2A 00 00 00 F6 65 00 00 00 06 45 41 31 41 42 43 08 54 65 73 74 20 56 48 46 11 41 63 74 69 76 69 64 61 64 20 64 6F 6D 69 6E 67 6F", Bulletin(246, 0x65000000, "EA1ABC", "Test VHF", "Actividad domingo")),
     ("01 45 00 0C 04 07 09 4E 6F 74 20 66 6F 75 6E 64", Error(Operation.GET_BULLETIN, ErrorCode.NOT_FOUND, "Not found")),
     ("01 43 00 07 02 00 00 00 00 7D 00", End(Operation.GET_NEW_MESSAGES, 0, 125, False)),
+    ("01 05 00 00", GetCapabilities()),
+    ("01 46 00 05 01 00 00 00 0F", Capabilities(1, 15)),
 ]
 
 @pytest.mark.parametrize(("hex_frame", "expected"), CANONICAL_VECTORS)

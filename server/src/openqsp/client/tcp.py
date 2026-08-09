@@ -1,9 +1,4 @@
-"""Small reusable client for the existing development TCP transport.
-
-The TCP handshake currently identifies a callsign but does not authenticate a
-password.  Core frames after that handshake are encoded and decoded solely by
-``openqsp.protocol``.
-"""
+"""Blocking reference client for authenticated OpenQSP TCP access."""
 
 from __future__ import annotations
 
@@ -14,10 +9,12 @@ import time
 
 from openqsp.protocol import (
     Bulletin,
+    Capabilities,
     BulletinHeader,
     End,
     Error,
     GetBulletin,
+    GetCapabilities,
     GetNewBulletins,
     GetNewMessages,
     Message,
@@ -27,11 +24,12 @@ from openqsp.protocol import (
     Stored,
     decode_frame_with_flags,
     encode_frame,
-    validate_callsign,
+    normalize_callsign,
 )
 from openqsp.protocol.constants import HEADER_SIZE, MAX_RETRIEVAL_MAX, UNSOLICITED_FLAG
 from openqsp.protocol.errors import InvalidFieldError, ProtocolDecodeError
 from openqsp.transport.tcp import (
+    AUTH_PREFIX,
     HANDSHAKE_ERROR,
     HANDSHAKE_OK,
     HANDSHAKE_PREFIX,
@@ -44,7 +42,7 @@ class ClientError(Exception):
 
 
 class AuthenticationError(ClientError):
-    """The development callsign handshake was rejected."""
+    """Production authentication was rejected."""
 
 
 class ConnectionClosedError(ClientError):
@@ -74,11 +72,13 @@ class OpenQSPClient:
         *,
         timeout: float = 10.0,
         event_handler: Callable[[ProtocolObject], None] | None = None,
+        allow_development_auth: bool = False,
     ) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
         self.event_handler = event_handler
+        self.allow_development_auth = allow_development_auth
         self.callsign: str | None = None
         self._socket: socket.socket | None = None
         self._reader: threading.Thread | None = None
@@ -108,39 +108,60 @@ class OpenQSPClient:
         try:
             sock = socket.create_connection((self.host, self.port), self.timeout)
         except OSError as error:
-            raise ClientError(f"cannot connect to {self.host}:{self.port}: {error}") from error
+            raise ClientError(
+                f"cannot connect to {self.host}:{self.port}: {error}"
+            ) from error
         sock.settimeout(None)
         self._socket = sock
         self._failure = None
 
     def authenticate(self, callsign: str, password: str | None = None) -> None:
-        """Perform the server's callsign handshake.
-
-        ``password`` is accepted to keep a forward-compatible programmatic API,
-        but a non-empty value is refused rather than silently sending or
-        ignoring a credential that the current transport cannot verify.
-        """
+        """Authenticate with a callsign and password over the bounded exchange."""
         if self._socket is None:
             raise ConnectionClosedError("client is not connected")
         if self.callsign is not None:
             raise ClientError("client is already authenticated")
-        if password:
-            raise AuthenticationError("this server transport does not support passwords")
         try:
-            validate_callsign(callsign)
+            normalized = normalize_callsign(callsign)
+            password_bytes = password.encode("utf-8") if password is not None else b""
+            if password is not None and (
+                not 1 <= len(password_bytes) <= 128
+                or b"\x00" in password_bytes
+                or b"\n" in password_bytes
+            ):
+                raise AuthenticationError("invalid credentials")
         except InvalidFieldError as error:
             raise AuthenticationError(str(error)) from error
         try:
-            self._socket.sendall(HANDSHAKE_PREFIX + callsign.encode("ascii") + b"\n")
+            if password is None:
+                if not self.allow_development_auth:
+                    raise AuthenticationError("password is required")
+                # Explicit compatibility path for test-only servers.
+                authentication = HANDSHAKE_PREFIX + normalized.encode("ascii") + b"\n"
+            else:
+                authentication = (
+                    AUTH_PREFIX
+                    + normalized.encode("ascii")
+                    + b" "
+                    + password_bytes
+                    + b"\n"
+                )
+            self._socket.sendall(authentication)
             response = self._read_line(MAX_HANDSHAKE_SIZE)
         except OSError as error:
             self.close()
-            raise ConnectionClosedError(f"connection failed during authentication: {error}") from error
+            raise ConnectionClosedError(
+                f"connection failed during authentication: {error}"
+            ) from error
         if response != HANDSHAKE_OK:
             self.close()
-            detail = "server rejected callsign" if response == HANDSHAKE_ERROR else "invalid handshake response"
+            detail = (
+                "invalid credentials"
+                if response == HANDSHAKE_ERROR
+                else "invalid authentication response"
+            )
             raise AuthenticationError(detail)
-        self.callsign = callsign
+        self.callsign = normalized
         self._reader = threading.Thread(
             target=self._reader_loop, name="openqsp-frame-reader", daemon=True
         )
@@ -160,24 +181,40 @@ class OpenQSPClient:
             raise ClientError("server returned an unexpected SEND_MESSAGE response")
         return responses[0]
 
-    def get_messages(self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX) -> tuple[list[Message], End]:
+    def get_messages(
+        self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX
+    ) -> tuple[list[Message], End]:
         responses = self.request(GetNewMessages(since, maximum))
         end = responses[-1] if responses else None
-        if not isinstance(end, End) or any(not isinstance(item, Message) for item in responses[:-1]):
+        if not isinstance(end, End) or any(
+            not isinstance(item, Message) for item in responses[:-1]
+        ):
             raise ClientError("server returned an unexpected GET_NEW_MESSAGES response")
         return list(responses[:-1]), end
 
-    def get_bulletins(self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX) -> tuple[list[BulletinHeader], End]:
+    def get_bulletins(
+        self, since: int = 0, maximum: int = MAX_RETRIEVAL_MAX
+    ) -> tuple[list[BulletinHeader], End]:
         responses = self.request(GetNewBulletins(since, maximum))
         end = responses[-1] if responses else None
-        if not isinstance(end, End) or any(not isinstance(item, BulletinHeader) for item in responses[:-1]):
-            raise ClientError("server returned an unexpected GET_NEW_BULLETINS response")
+        if not isinstance(end, End) or any(
+            not isinstance(item, BulletinHeader) for item in responses[:-1]
+        ):
+            raise ClientError(
+                "server returned an unexpected GET_NEW_BULLETINS response"
+            )
         return list(responses[:-1]), end
 
     def get_bulletin(self, sequence: int) -> Bulletin:
         responses = self.request(GetBulletin(sequence))
         if len(responses) != 1 or not isinstance(responses[0], Bulletin):
             raise ClientError("server returned an unexpected GET_BULLETIN response")
+        return responses[0]
+
+    def get_capabilities(self) -> Capabilities:
+        responses = self.request(GetCapabilities())
+        if len(responses) != 1 or not isinstance(responses[0], Capabilities):
+            raise ClientError("server returned an unexpected GET_CAPABILITIES response")
         return responses[0]
 
     def request(self, request: ProtocolObject) -> list[ProtocolObject]:
@@ -187,13 +224,16 @@ class OpenQSPClient:
             GetNewMessages: Operation.GET_NEW_MESSAGES,
             GetNewBulletins: Operation.GET_NEW_BULLETINS,
             GetBulletin: Operation.GET_BULLETIN,
+            GetCapabilities: Operation.GET_CAPABILITIES,
         }.get(type(request))
         if operation is None:
             raise ClientError(f"{type(request).__name__} is not a client request")
         with self._request_lock:
             with self._condition:
                 if not self.authenticated or self._failure is not None:
-                    raise self._failure or ConnectionClosedError("client is not authenticated")
+                    raise self._failure or ConnectionClosedError(
+                        "client is not authenticated"
+                    )
                 self._pending_operation = operation
                 self._responses = []
             try:
@@ -312,10 +352,18 @@ class OpenQSPClient:
             return True
         if self._pending_operation == Operation.SEND_MESSAGE:
             return isinstance(last, Stored)
-        if self._pending_operation in (Operation.GET_NEW_MESSAGES, Operation.GET_NEW_BULLETINS):
-            return isinstance(last, End) and last.request_operation == self._pending_operation
+        if self._pending_operation in (
+            Operation.GET_NEW_MESSAGES,
+            Operation.GET_NEW_BULLETINS,
+        ):
+            return (
+                isinstance(last, End)
+                and last.request_operation == self._pending_operation
+            )
         if self._pending_operation == Operation.GET_BULLETIN:
             return isinstance(last, Bulletin)
+        if self._pending_operation == Operation.GET_CAPABILITIES:
+            return isinstance(last, Capabilities)
         return False
 
     def _set_failure(self, failure: ClientError) -> None:

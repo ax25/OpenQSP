@@ -14,6 +14,7 @@ from .bulletins import (
     StoredBulletinHeader,
 )
 from .database import Database, UnsupportedSchemaVersionError
+from .accounts import AccountExistsError, AccountStore, InvalidCredentialsError
 from .messages import (
     MessagePage,
     MessageStore,
@@ -23,11 +24,14 @@ from .migrations import LATEST_SCHEMA_VERSION
 
 __all__ = [
     "BulletinPage",
+    "AccountExistsError",
+    "AccountStore",
     "BulletinStore",
     "Database",
     "LATEST_SCHEMA_VERSION",
     "MAX_U32",
     "InvalidCursorError",
+    "InvalidCredentialsError",
     "MessagePage",
     "MessageStore",
     "SequenceExhaustedError",

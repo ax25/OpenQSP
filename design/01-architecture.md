@@ -193,3 +193,7 @@ The following architectural topics remain intentionally unresolved:
 - Which conflict-resolution rules are needed during synchronization.
 - How message expiration and retention policies are defined.
 - Whether attachments belong in the initial protocol or a later extension.
+
+## M6 identity and session boundary
+
+Internet transports authenticate against persistent callsign accounts before creating a runtime session. The boundary is `transport -> account authentication/session -> ServerCore -> stores`: sockets move bytes, sessions carry the verified normalized identity and presence, Core authorizes application operations, and SQLite owns durable state. A session is not an account or socket identity. More than one active session may bind the same account, and each receives eligible push events.

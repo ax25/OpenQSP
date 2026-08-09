@@ -1,6 +1,6 @@
 """Constants and wire-level enumerations for OpenQSP version 0.1."""
 
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 
 PROTOCOL_VERSION = 0x01
 HEADER_SIZE = 4
@@ -31,6 +31,7 @@ class Operation(IntEnum):
     GET_NEW_MESSAGES = 0x02
     GET_NEW_BULLETINS = 0x03
     GET_BULLETIN = 0x04
+    GET_CAPABILITIES = 0x05
 
     MESSAGE = 0x40
     BULLETIN_HEADER = 0x41
@@ -38,6 +39,24 @@ class Operation(IntEnum):
     END = 0x43
     STORED = 0x44
     ERROR = 0x45
+    CAPABILITIES = 0x46
+
+
+class Capability(IntFlag):
+    """Services implemented by this protocol/node combination."""
+
+    PRIVATE_MESSAGING = 0x00000001
+    BULLETIN_LISTING = 0x00000002
+    BULLETIN_RETRIEVAL = 0x00000004
+    PROACTIVE_PRIVATE_MESSAGES = 0x00000008
+
+
+IMPLEMENTED_CAPABILITIES = (
+    Capability.PRIVATE_MESSAGING
+    | Capability.BULLETIN_LISTING
+    | Capability.BULLETIN_RETRIEVAL
+    | Capability.PROACTIVE_PRIVATE_MESSAGES
+)
 
 
 class ErrorCode(IntEnum):

@@ -535,3 +535,12 @@ At minimum, implementations should use these vectors to verify:
 10. Correct empty and paginated responses.
 11. `NOT_FOUND` handling for unknown bulletins.
 12. Safe rejection of truncated and malformed frames.
+
+## Capability discovery
+
+```text
+GET_CAPABILITIES  01 05 00 00
+CAPABILITIES      01 46 00 05 01 00 00 00 0F
+```
+
+The response advertises protocol `1` and all four currently implemented services. A pushed `MESSAGE` has flags byte `01`; a synchronized `MESSAGE` has flags byte `00`.

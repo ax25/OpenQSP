@@ -39,7 +39,7 @@ Relevant documents:
 
 **Milestone 5 - Internet transport is complete.**
 
-Before implementing the APRS transport, the next server-side work should close the remaining production gaps that affect every transport: authentication, authenticated session lifecycle, server-initiated delivery/presence, and capability discovery. These concerns must remain transport-independent so TCP, APRS and future adapters share the same application behaviour.
+M6 closed the shared production gaps for authentication, authenticated sessions, server-initiated delivery/presence, and capability discovery. M7 can now implement APRS while reusing these transport-independent application semantics.
 
 ---
 
@@ -242,7 +242,7 @@ Production-grade authentication remains a later milestone, and development authe
 
 ## 8. Milestone 6 - Production identity, sessions and node capabilities
 
-**Status: next**
+**Status: complete**
 
 Objective: replace development-only callsign identification with a production-capable identity/session boundary and define how a client discovers what a node can do before APRS transport work begins.
 
@@ -271,7 +271,7 @@ Acceptance criteria:
 
 ## 9. Milestone 7 - APRS transport profile and simulator
 
-**Status: planned**
+**Status: active**
 
 Objective: define, simulate and implement OpenQSP carriage over APRS after the node core and shared session semantics are stable.
 
