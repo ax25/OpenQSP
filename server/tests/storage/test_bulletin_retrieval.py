@@ -1,7 +1,6 @@
 """Tests for bulletin synchronization and sequence lookup."""
 
 import pytest
-
 from openqsp.storage import (
     BulletinStore,
     Database,

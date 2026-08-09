@@ -1,10 +1,10 @@
 """Focused synchronous client transport tests."""
 
-from contextlib import contextmanager
 import socket
-import threading
-from pathlib import Path
 import sys
+import threading
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +12,7 @@ TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from client_sim import (  # noqa: E402
+from client_sim import (
     ConnectionFailed,
     DevelopmentClient,
     DevelopmentHandshakeError,
@@ -20,13 +20,13 @@ from client_sim import (  # noqa: E402
     TransportError,
     TruncatedResponseError,
 )
-from openqsp.protocol import (  # noqa: E402
-    Stored,
+from openqsp.protocol import (
     End,
     GetNewMessages,
     Message,
     Operation,
     SendMessage,
+    Stored,
     encode_frame,
 )
 

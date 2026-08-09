@@ -1,8 +1,8 @@
 """Run the existing scenario assertions through the real TCP stack."""
 
+import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-import sys
 
 import pytest
 
@@ -10,8 +10,7 @@ TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from scenario_environment import RemoteScenarioEnvironment  # noqa: E402
-
+from scenario_environment import RemoteScenarioEnvironment
 
 E2E_ROOT = Path(__file__).parent
 CASES = (

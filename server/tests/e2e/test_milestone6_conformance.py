@@ -4,15 +4,14 @@ import asyncio
 import sqlite3
 
 import pytest
-
 from openqsp.client import AuthenticationError, OpenQSPClient
 from openqsp.protocol import (
+    IMPLEMENTED_CAPABILITIES,
+    PROTOCOL_VERSION,
     Capabilities,
     Capability,
     GetNewMessages,
-    IMPLEMENTED_CAPABILITIES,
     Message,
-    PROTOCOL_VERSION,
     SendMessage,
     Stored,
     decode_frame,

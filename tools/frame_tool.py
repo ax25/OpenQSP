@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from collections.abc import Callable
 from dataclasses import fields
 from enum import IntEnum
 from pathlib import Path
-import sys
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 # Make the production package importable from an uninstalled development checkout.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -16,17 +17,17 @@ SERVER_SRC = REPOSITORY_ROOT / "server" / "src"
 if str(SERVER_SRC) not in sys.path:
     sys.path.insert(0, str(SERVER_SRC))
 
-from openqsp.protocol.codec import decode_frame, encode_frame  # noqa: E402
-from openqsp.protocol.constants import (  # noqa: E402
+from openqsp.protocol.codec import decode_frame, encode_frame
+from openqsp.protocol.constants import (
     HEADER_SIZE,
     ErrorCode,
     Operation,
 )
-from openqsp.protocol.errors import ProtocolError  # noqa: E402
-from openqsp.protocol.models import (  # noqa: E402
+from openqsp.protocol.errors import ProtocolError
+from openqsp.protocol.models import (
     Bulletin,
-    Capabilities,
     BulletinHeader,
+    Capabilities,
     End,
     Error,
     GetBulletin,

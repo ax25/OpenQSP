@@ -7,14 +7,16 @@ of connections or sessions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from collections.abc import Callable
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from openqsp.protocol import (
+    IMPLEMENTED_CAPABILITIES,
+    PROTOCOL_VERSION,
     Bulletin,
-    Capabilities,
     BulletinHeader,
+    Capabilities,
     End,
     Error,
     ErrorCode,
@@ -27,8 +29,6 @@ from openqsp.protocol import (
     ProtocolObject,
     SendMessage,
     Stored,
-    IMPLEMENTED_CAPABILITIES,
-    PROTOCOL_VERSION,
     decode_frame,
     encode_frame,
     validate_callsign,
@@ -47,7 +47,6 @@ from openqsp.storage import (
     SequenceExhaustedError,
     StorageIntegrityError,
 )
-
 
 logger = logging.getLogger(__name__)
 

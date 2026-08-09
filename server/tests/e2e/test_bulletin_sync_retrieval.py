@@ -1,8 +1,8 @@
 """M4.8 end-to-end public bulletin synchronization and retrieval."""
 
+import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-import sys
 
 from openqsp.protocol import (
     Bulletin,
@@ -13,12 +13,11 @@ from openqsp.protocol import (
     Operation,
 )
 
-
 TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from scenario_environment import LocalScenarioEnvironment  # noqa: E402
+from scenario_environment import LocalScenarioEnvironment
 
 SCENARIO_PATH = (
     Path(__file__).parents[3] / "tools" / "scenarios" / "bulletin_sync_retrieval.py"

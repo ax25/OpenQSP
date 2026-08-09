@@ -6,7 +6,6 @@ import concurrent.futures
 import sqlite3
 
 import pytest
-
 from openqsp.storage import Database, MessageStore, SequenceExhaustedError
 
 

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import socket
 import threading
 import time
+from collections.abc import Callable
 
 from openqsp.protocol import (
     Bulletin,
-    Capabilities,
     BulletinHeader,
+    Capabilities,
     End,
     Error,
     GetBulletin,
@@ -36,7 +36,6 @@ from openqsp.transport.tcp import (
     HANDSHAKE_PREFIX,
     MAX_HANDSHAKE_SIZE,
 )
-
 
 logger = logging.getLogger(__name__)
 

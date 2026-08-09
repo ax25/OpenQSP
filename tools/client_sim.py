@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import socket
 import sys
+from pathlib import Path
 from typing import Protocol
 
 # Make the production package importable from an uninstalled checkout.
@@ -15,7 +15,7 @@ SERVER_SRC = REPOSITORY_ROOT / "server" / "src"
 if str(SERVER_SRC) not in sys.path:
     sys.path.insert(0, str(SERVER_SRC))
 
-from openqsp.protocol import (  # noqa: E402
+from openqsp.protocol import (
     Bulletin,
     BulletinHeader,
     End,
@@ -31,10 +31,10 @@ from openqsp.protocol import (  # noqa: E402
     decode_frame,
     encode_frame,
 )
-from openqsp.protocol.errors import ProtocolError  # noqa: E402
-from openqsp.protocol.constants import HEADER_SIZE, MAX_FRAME_SIZE  # noqa: E402
-from openqsp.server import ServerCore  # noqa: E402
-from openqsp.storage import BulletinStore, Database, MessageStore  # noqa: E402
+from openqsp.protocol.constants import HEADER_SIZE, MAX_FRAME_SIZE
+from openqsp.protocol.errors import ProtocolError
+from openqsp.server import ServerCore
+from openqsp.storage import BulletinStore, Database, MessageStore
 
 
 class ClientTransport(Protocol):

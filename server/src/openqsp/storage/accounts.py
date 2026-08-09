@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import base64
-from contextlib import closing
 import hashlib
 import hmac
 import os
 import sqlite3
 import time
+from contextlib import closing
 
 from openqsp.protocol import normalize_callsign
 from openqsp.protocol.errors import InvalidFieldError

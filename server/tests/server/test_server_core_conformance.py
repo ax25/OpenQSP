@@ -1,9 +1,20 @@
 """Integrated Milestone 3 conformance workflows through encoded Core frames."""
 
 from openqsp.protocol import (
-    Stored, Bulletin, BulletinHeader, End, Error, ErrorCode,
-    GetBulletin, GetNewBulletins, GetNewMessages, Message, Operation,
-    SendMessage, decode_frame, encode_frame,
+    Bulletin,
+    BulletinHeader,
+    End,
+    Error,
+    ErrorCode,
+    GetBulletin,
+    GetNewBulletins,
+    GetNewMessages,
+    Message,
+    Operation,
+    SendMessage,
+    Stored,
+    decode_frame,
+    encode_frame,
 )
 from openqsp.server import ServerCore
 from openqsp.storage import BulletinStore, Database, MessageStore

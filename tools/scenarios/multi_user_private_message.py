@@ -3,27 +3,26 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-import sys
 
 TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from scenario_environment import (  # noqa: E402
-    LocalScenarioEnvironment,
-    ScenarioEnvironment,
-)
-from openqsp.protocol import (  # noqa: E402
-    Stored,
+from openqsp.protocol import (
     End,
     GetNewMessages,
     Message,
     ProtocolObject,
     SendMessage,
+    Stored,
 )
-
+from scenario_environment import (
+    LocalScenarioEnvironment,
+    ScenarioEnvironment,
+)
 
 SENDER = "EA3AAA"
 RECIPIENT = "EA3BBB"

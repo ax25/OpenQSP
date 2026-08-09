@@ -5,14 +5,14 @@ import asyncio
 from openqsp.client import AuthenticationError, OpenQSPClient, ProtocolResponseError
 from openqsp.client.cli import CommandSession
 from openqsp.protocol import (
-    Stored,
     BulletinHeader,
+    Capabilities,
     End,
     Error,
     ErrorCode,
-    Capabilities,
     Message,
     Operation,
+    Stored,
     decode_frame,
     encode_frame,
 )

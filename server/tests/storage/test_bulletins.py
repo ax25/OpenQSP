@@ -3,7 +3,6 @@
 import sqlite3
 
 import pytest
-
 from openqsp.storage import BulletinStore, Database, SequenceExhaustedError
 
 

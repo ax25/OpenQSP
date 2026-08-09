@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 TOOL_PATH = Path(__file__).parents[3] / "tools" / "frame_tool.py"
 SPEC = spec_from_file_location("frame_tool", TOOL_PATH)
 assert SPEC and SPEC.loader

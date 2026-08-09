@@ -6,16 +6,14 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
-
 from openqsp.protocol import (
-    Stored,
     End,
     Message,
     Operation,
     SendMessage,
+    Stored,
     encode_frame,
 )
-
 
 TOOL_PATH = Path(__file__).parents[3] / "tools" / "client_sim.py"
 SPEC = spec_from_file_location("client_sim", TOOL_PATH)

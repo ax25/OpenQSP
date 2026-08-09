@@ -1,9 +1,7 @@
 """Tests for the transport-independent server-core boundary."""
 
 import pytest
-
 from openqsp.protocol import (
-    Stored,
     Bulletin,
     BulletinHeader,
     End,
@@ -14,11 +12,11 @@ from openqsp.protocol import (
     Message,
     Operation,
     SendMessage,
+    Stored,
     decode_frame,
     encode_frame,
 )
 from openqsp.server import RequestContext, ServerCore
-
 
 REQUESTS_WITHOUT_STORES = (
     (GetNewBulletins(0, 5), Operation.GET_NEW_BULLETINS),

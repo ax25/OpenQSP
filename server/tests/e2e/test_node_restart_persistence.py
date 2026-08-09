@@ -1,14 +1,15 @@
 """M4.7 end-to-end node-restart persistence and synchronization recovery."""
+import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-import sys
-from openqsp.protocol import Stored, End, Message, Operation
+
+from openqsp.protocol import End, Message, Operation, Stored
 
 TOOLS_ROOT = Path(__file__).parents[3] / "tools"
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from scenario_environment import LocalScenarioEnvironment  # noqa: E402
+from scenario_environment import LocalScenarioEnvironment
 
 SCENARIO_PATH = (
     Path(__file__).parents[3] / "tools" / "scenarios" / "node_restart_persistence.py"

@@ -1,15 +1,16 @@
 import pytest
-
 from openqsp.protocol.codec import decode_frame, encode_frame
 from openqsp.protocol.constants import ErrorCode, Operation
 from openqsp.protocol.errors import (
-    InvalidFieldError, PayloadLengthError, UnknownOperationError,
+    InvalidFieldError,
+    PayloadLengthError,
+    UnknownOperationError,
     UnsupportedVersionError,
 )
 from openqsp.protocol.models import (
     Bulletin,
-    Capabilities,
     BulletinHeader,
+    Capabilities,
     End,
     Error,
     GetBulletin,
@@ -20,7 +21,6 @@ from openqsp.protocol.models import (
     SendMessage,
     Stored,
 )
-
 
 CANONICAL_VECTORS = [
     ("01 01 00 10 65 00 00 00 06 45 41 31 41 42 43 04 48 6F 6C 61", SendMessage(0x65000000, "EA1ABC", "Hola")),
