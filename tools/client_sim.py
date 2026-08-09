@@ -7,7 +7,7 @@ import argparse
 import socket
 import sys
 from pathlib import Path
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 # Make the production package importable from an uninstalled checkout.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -81,7 +81,7 @@ class TcpTransport:
     reusable connections while avoiding a client-side session manager.
     """
 
-    _TERMINATORS = {
+    _TERMINATORS: ClassVar[dict[Operation, set[Operation]]] = {
         Operation.SEND_MESSAGE: {Operation.STORED, Operation.ERROR},
         Operation.GET_NEW_MESSAGES: {Operation.END, Operation.ERROR},
         Operation.GET_NEW_BULLETINS: {Operation.END, Operation.ERROR},

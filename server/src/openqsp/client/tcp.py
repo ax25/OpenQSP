@@ -7,6 +7,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable
+from typing import Self
 
 from openqsp.protocol import (
     Bulletin,
@@ -285,7 +286,7 @@ class OpenQSPClient:
         with self._condition:
             self._condition.notify_all()
 
-    def __enter__(self) -> OpenQSPClient:
+    def __enter__(self) -> Self:
         self.connect()
         return self
 

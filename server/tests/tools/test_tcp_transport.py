@@ -88,11 +88,13 @@ def test_multiple_response_frames_are_read_through_end():
 
 
 def test_rejected_development_handshake_is_a_transport_error():
-    with _scripted_server([], handshake=b"ERROR\n") as port:
-        with pytest.raises(DevelopmentHandshakeError):
-            TcpTransport("127.0.0.1", port).exchange(
-                "BAD", encode_frame(GetNewMessages(0, 5))
-            )
+    with (
+        _scripted_server([], handshake=b"ERROR\n") as port,
+        pytest.raises(DevelopmentHandshakeError),
+    ):
+        TcpTransport("127.0.0.1", port).exchange(
+            "BAD", encode_frame(GetNewMessages(0, 5))
+        )
 
 
 @pytest.mark.parametrize("partial", [b"", b"\x01\x43", b"\x01\x43\x00\x05abc"])

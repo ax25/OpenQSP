@@ -13,6 +13,7 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Self
 
 from openqsp.protocol import encode_frame, validate_callsign
 from openqsp.protocol.constants import HEADER_SIZE, MAX_FRAME_SIZE
@@ -120,7 +121,7 @@ class TCPServer:
         if hasattr(self.server_core, "remove_message_listener"):
             self.server_core.remove_message_listener(self.sessions.deliver_message)
 
-    async def __aenter__(self) -> TCPServer:
+    async def __aenter__(self) -> Self:
         await self.start()
         return self
 
