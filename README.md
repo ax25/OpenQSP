@@ -152,9 +152,13 @@ Currently implemented:
 - a TCP server and remote client transport supporting all four v0.1 client operations through production codec, Core, and storage paths;
 - persistent mailbox and bulletin state, cursors, and sequence allocation across TCP reconnects and full node restarts.
 
-Normal TCP access uses persistent callsign accounts, password authentication, transport-independent ACTIVE sessions, safe unsolicited private-message delivery, and machine-readable capability discovery. APRS and the end-user application remain future work.
+Normal TCP access uses persistent callsign accounts and password authentication.
+The APRS profile adds bounded fragmentation, ACK/retry, replay, rate/activity
+state, proactive delivery, deterministic simulation, and an APRS-IS path. APRS
+identity is transport-asserted, not cryptographically authenticated. The
+end-user application remains future work.
 
-The next active milestone is the M7 APRS transport profile and simulator.
+The next active milestone is the M8 user application.
 
 ---
 
@@ -167,7 +171,7 @@ The next active milestone is the M7 APRS transport profile and simulator.
 - [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
 - [x] **Milestone 5 — Internet transport**
 - [x] **Milestone 6 — Production identity, sessions and node capabilities**
-- [ ] **Milestone 7 — APRS transport profile and simulator**
+- [x] **Milestone 7 — APRS transport profile and simulator**
 - [ ] **Milestone 8 — User application**
 
 The first minimum server release is defined by completion of Milestones 1 through 4.
@@ -185,6 +189,7 @@ Available tools include:
 ```text
 tools/frame_tool.py
 tools/client_sim.py
+tools/aprs_sim.py
 ```
 
 `frame_tool.py` can:

@@ -8,6 +8,20 @@ These tools are part of the development strategy of OpenQSP. They are not dispos
 
 They must not implement a second, independent interpretation of OpenQSP semantics.
 
+## APRS simulator
+
+`aprs_sim.py` reuses the production APRS carriage and adapter with a virtual
+clock. It exposes a seeded fault model for packet/ACK loss, duplication,
+reordering, delays, stale ACKs, replay, and transaction conflicts. Run its
+network-free Core conformance workflow with:
+
+```bash
+PYTHONPATH=server/src python tools/aprs_sim.py --conformance
+```
+
+Real APRS-IS credentials are supplied only through deployment configuration;
+the simulator needs none.
+
 ---
 
 ## 1. Tool progression
