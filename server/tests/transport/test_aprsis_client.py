@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from openqsp.protocol import GetCapabilities, encode_frame
+from openqsp.server import ServerCore
+from openqsp.transport.aprs import AdapterConfig, APRSAdapter
+from openqsp.transport.aprs.aprsis import APRSISClient, APRSISConfig
+from openqsp.transport.aprs.carriage import APRSFragment, fragment_frame
+
+
+class FakeReader:
+    def __init__(self, lines: list[str]) -> None:
+        self.lines = [f"{line}\r\n".encode() for line in lines]
+
+    def at_eof(self) -> bool:
+        return not self.lines
+
+    async def readline(self) -> bytes:
+        return self.lines.pop(0) if self.lines else b""
+
+
+class FakeWriter:
+    def __init__(self) -> None:
+        self.data: list[bytes] = []
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.data.append(data)
+
+    async def drain(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        pass
+
+
+def inbound_line(peer: str = "EA3AAA-10") -> str:
+    fragment = fragment_frame(encode_frame(GetCapabilities()), "0A7")[0]
+    body = APRSFragment(
+        fragment.transaction_id,
+        fragment.index,
+        fragment.total,
+        fragment.data,
+        "4F",
+    ).body
+    return f"{peer}>APRS,TCPIP*::OPENQSP  :{body}"
+
+
+def test_connection_login_receive_emit_ignore_and_cleanup_without_network(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    config = APRSISConfig(passcode="secret-from-environment")
+    client = APRSISClient(adapter, config)
+    client.running = True
+    reader = FakeReader(
+        [
+            "# logresp OPENQSP verified, server LOCAL",
+            "malformed",
+            inbound_line().replace("OPENQSP  ", "OTHER    "),
+            inbound_line(),
+        ]
+    )
+    writer = FakeWriter()
+
+    calls = 0
+
+    async def connector(_host: str, _port: int):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return reader, writer
+        client.stop()
+        raise OSError("test complete")
+
+    client.connector = connector
+    asyncio.run(client.run())
+    output = b"".join(writer.data).decode()
+    assert output.startswith(
+        "user OPENQSP pass secret-from-environment vers OpenQSP 0.1 "
+        "filter g/OPENQSP"
+    )
+    assert "OPENQSP>APOQSP,TCPIP*::EA3AAA-10:ack4F" in output
+    assert "secret-from-environment" not in caplog.text
+    assert writer.closed
+    assert adapter.queued_count == adapter.pending_count == 0
+    # Replay/reassembly are socket-independent and remain TTL bounded.
+    assert len(adapter.replay) == 1
+
+
+def test_unverified_login_is_rejected_and_link_state_is_cleaned() -> None:
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities()))
+    client = APRSISClient(adapter, APRSISConfig(passcode="external"))
+    client.running = True
+    writer = FakeWriter()
+    with pytest.raises(ConnectionError, match="not verified"):
+        asyncio.run(
+            client._connection(
+                FakeReader(["# logresp OPENQSP unverified, server LOCAL"]), writer
+            )
+        )
+    assert writer.closed
+    assert adapter.queued_count == adapter.pending_count == 0
+
+
+def test_run_reconnects_after_connector_failure_without_real_sleep() -> None:
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    config = APRSISConfig(passcode="external", reconnect_delay=0)
+    calls = 0
+    writer = FakeWriter()
+
+    async def connector(_host: str, _port: int):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("temporary local failure")
+        if calls == 2:
+            return FakeReader(["# logresp OPENQSP verified, server LOCAL"]), writer
+        client.stop()
+        raise OSError("stop")
+
+    client = APRSISClient(adapter, config, connector=connector)
+    asyncio.run(client.run())
+    assert calls == 3
+    assert writer.data[0].decode().startswith(
+        "user OPENQSP pass external vers OpenQSP 0.1 filter g/OPENQSP"
+    )
+    assert writer.closed

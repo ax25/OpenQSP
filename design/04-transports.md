@@ -135,7 +135,8 @@ Two nodes may legitimately hold different activity states for the same user.
 
 Proactive APRS delivery must be rate-limited and must respect channel capacity, duplicate suppression and transport rules.
 
-Detailed timing, retry count, fragmentation and APRS text-safe encoding remain to be specified in a dedicated APRS transport profile.
+The implemented canonical timing, retry, fragmentation, Base64url carriage,
+bounded replay, and activity policy is specified in `10-aprs-profile.md`.
 
 That profile may use APRS native message IDs and acknowledgements, retries, duplicate
 suppression, fragmentation/reassembly, peer-scoped transaction state and replay of a previous

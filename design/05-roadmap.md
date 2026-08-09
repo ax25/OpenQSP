@@ -275,7 +275,7 @@ Acceptance criteria:
 
 Objective: define, simulate and implement OpenQSP carriage over APRS after the node core and shared session semantics are stable.
 
-Required design work before implementation:
+Implemented profile capabilities:
 
 - text-safe encoding;
 - fragmentation and reassembly;
@@ -286,7 +286,12 @@ Required design work before implementation:
 - channel rate control;
 - proactive delivery while the user is locally active.
 
-Before APRS-IS or RF testing, implement `tools/aprs_sim.py` or equivalent to transform between complete OpenQSP Core frames and the defined APRS carriage representation.
+`tools/aprs_sim.py` transforms between complete Core frames and production APRS
+carriage with a virtual clock and deterministic faults. Local/simulator
+conformance and the APRS-IS production code path are implemented. Live
+APRS-IS, including cross-server propagation, remains pending external
+validation before M7 can close. Live RF remains a later field-validation
+boundary and does not block automated development.
 
 The simulator should support controlled fault injection for at least:
 

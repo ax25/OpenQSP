@@ -135,9 +135,9 @@ The detailed implementation roadmap is maintained in [`design/05-roadmap.md`](de
 
 # Current Status
 
-✅ **Minimum Node Core and Development TCP Transport Implemented — OpenQSP Core v0.1**
+✅ **Milestone 7 complete — OpenQSP Core v0.1 with TCP and APRS-IS transport paths**
 
-The design baseline and Milestones 1 through 6 are complete. The version 0.1 minimum node supports both local Core execution and development TCP Internet transport.
+The design baseline and Milestones 1 through 7 are complete. The version 0.1 node supports local Core execution, authenticated TCP Internet access, and the APRS transport profile over APRS-IS.
 
 Currently implemented:
 
@@ -150,11 +150,16 @@ Currently implemented:
 - persistent SQLite storage and the minimum `ServerCore`;
 - maintained multi-user, synchronization, restart and bulletin scenarios;
 - a TCP server and remote client transport supporting all four v0.1 client operations through production codec, Core, and storage paths;
-- persistent mailbox and bulletin state, cursors, and sequence allocation across TCP reconnects and full node restarts.
+- persistent mailbox and bulletin state, cursors, and sequence allocation across TCP reconnects and full node restarts;
+- APRS Base64url carriage, bounded fragmentation/reassembly, native ACK/retry, replay/deduplication, rate/activity state and proactive private-message delivery;
+- deterministic APRS simulation with fault injection;
+- production APRS-IS connection/reconnection path with verified login and cross-server validation.
 
-Normal TCP access uses persistent callsign accounts, password authentication, transport-independent ACTIVE sessions, safe unsolicited private-message delivery, and machine-readable capability discovery. APRS and the end-user application remain future work.
+Normal TCP access uses persistent callsign accounts and password authentication. APRS identity is transport-asserted, not cryptographically authenticated, and account passwords are never sent over APRS.
 
-The next active milestone is the M7 APRS transport profile and simulator.
+M7 live acceptance was completed on 2026-08-09. Real APRS-IS tests covered verified node login, capability discovery, seven-fragment message storage, durable retrieval after node restart, unsolicited proactive delivery, forced TCP disconnect with automatic APRS-IS reconnection, and deliberate cross-server exchanges between distinct Tier-2 servers. See [`design/M7-live-aprsis-acceptance.md`](design/M7-live-aprsis-acceptance.md). RF/IGate field validation remains a later field activity and does not block M7 completion.
+
+The next active milestone is M8, the first user-facing application.
 
 ---
 
@@ -167,8 +172,8 @@ The next active milestone is the M7 APRS transport profile and simulator.
 - [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
 - [x] **Milestone 5 — Internet transport**
 - [x] **Milestone 6 — Production identity, sessions and node capabilities**
-- [ ] **Milestone 7 — APRS transport profile and simulator**
-- [ ] **Milestone 8 — User application**
+- [x] **Milestone 7 — APRS transport profile and simulator**
+- [ ] **Milestone 8 — User application** *(next)*
 
 The first minimum server release is defined by completion of Milestones 1 through 4.
 
@@ -185,6 +190,7 @@ Available tools include:
 ```text
 tools/frame_tool.py
 tools/client_sim.py
+tools/aprs_sim.py
 ```
 
 `frame_tool.py` can:
@@ -223,4 +229,4 @@ The reference client uses production callsign-and-password authentication and ex
 
 The node now uses persistent normalized callsign accounts and password authentication, transport-independent active sessions, best-effort unsolicited private-message delivery, and capability discovery. Provision an account with `openqsp-server --database openqsp.db --create-account EA3AAA 'password'`; connect with `openqsp-client --callsign EA3AAA` and enter the password securely.
 
-A previously configured future client must be able to open without Internet and inspect locally cached state. Node operations remain pending or unavailable until connectivity and server authentication return. Local application access is not server authentication. No credential/token cache semantics are implied; any future cache requires an explicit security design. APRS authentication is deferred to M7. Reconnection and reauthentication resolve to the same persistent base-callsign account and mailbox.
+A previously configured future client must be able to open without Internet and inspect locally cached state. Node operations remain pending or unavailable until connectivity and server authentication return. Local application access is not server authentication. No credential/token cache semantics are implied; any future cache requires an explicit security design. APRS source identity is transport-asserted and intentionally separate from password-authenticated Internet sessions. Reconnection and transport changes resolve to the same persistent base-callsign mailbox identity.
