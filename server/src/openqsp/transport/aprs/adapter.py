@@ -31,7 +31,7 @@ from .carriage import (
 )
 from .state import Reassembler, ReplayCache, TransactionConflict
 
-SERVICE_CALLSIGN = "OPENQSP"
+SERVICE_CALLSIGN = "OPENQSP"  # Backwards-compatible profile default.
 _PEER_RE = re.compile(r"[A-Z0-9]{3,12}(?:-[0-9]{1,2})?")
 _ACK_RE = re.compile(r"ack([0-9A-Z]{1,5})")
 
@@ -53,7 +53,11 @@ class AdapterConfig:
     event_history_capacity: int = 512
 
     def __post_init__(self) -> None:
-        if self.ack_timeout <= 0 or self.max_attempts <= 0 or self.activity_timeout <= 0:
+        if (
+            self.ack_timeout <= 0
+            or self.max_attempts <= 0
+            or self.activity_timeout <= 0
+        ):
             raise ValueError("timeouts and attempts must be positive")
         if self.min_interval < 0 or self.queue_capacity <= 0:
             raise ValueError("rate interval must be non-negative and queue bounded")
@@ -90,13 +94,25 @@ class _Pending:
 class APRSAdapter:
     """Synchronous state machine; callers inject packets and advance a clock."""
 
-    def __init__(self, core: ServerCore, *, config: AdapterConfig | None = None,
-                 clock: Callable[[], float] | None = None) -> None:
+    def __init__(
+        self,
+        core: ServerCore,
+        *,
+        config: AdapterConfig | None = None,
+        clock: Callable[[], float] | None = None,
+        service_callsign: str = SERVICE_CALLSIGN,
+    ) -> None:
         self.core, self.config = core, config or AdapterConfig()
+        self.service_callsign = self.validate_peer(service_callsign.upper())
         self.clock = clock or time.monotonic
-        self.reassembly = Reassembler(ttl=self.config.reassembly_ttl, max_entries=self.config.max_reassemblies)
-        self.replay = ReplayCache(ttl=self.config.replay_ttl, max_entries=self.config.max_replays,
-                                  max_per_peer=self.config.max_replays_per_peer)
+        self.reassembly = Reassembler(
+            ttl=self.config.reassembly_ttl, max_entries=self.config.max_reassemblies
+        )
+        self.replay = ReplayCache(
+            ttl=self.config.replay_ttl,
+            max_entries=self.config.max_replays,
+            max_per_peer=self.config.max_replays_per_peer,
+        )
         self._queue: list[_Queued] = []
         self._pending: dict[tuple[str, str], _Pending] = {}
         self._immediate: list[OutboundPacket] = []
@@ -121,9 +137,7 @@ class APRSAdapter:
     def _allocate(self, peer: str, *, transaction: bool) -> str:
         counters = self._next_transaction if transaction else self._next_message
         width, space = (
-            (3, self.config.transaction_id_space)
-            if transaction
-            else (2, 36**2)
+            (3, self.config.transaction_id_space) if transaction else (2, 36**2)
         )
         active_transactions = self._active_transactions(peer) if transaction else set()
         active_messages = self._active_message_ids(peer) if not transaction else set()
@@ -143,9 +157,7 @@ class APRSAdapter:
     def _active_transactions(self, peer: str) -> set[str]:
         """Return bounded outbound TTTs still queued or awaiting an APRS ACK."""
         active = {
-            item.fragment.transaction_id
-            for item in self._queue
-            if item.peer == peer
+            item.fragment.transaction_id for item in self._queue if item.peer == peer
         }
         for (pending_peer, _), pending in self._pending.items():
             if pending_peer != peer:
@@ -181,8 +193,13 @@ class APRSAdapter:
         priority = 1 if proactive else 0
         for fragment in fragments:
             message_id = self._allocate(peer, transaction=False)
-            queued = APRSFragment(fragment.transaction_id, fragment.index, fragment.total,
-                                  fragment.data, message_id)
+            queued = APRSFragment(
+                fragment.transaction_id,
+                fragment.index,
+                fragment.total,
+                fragment.data,
+                message_id,
+            )
             heapq.heappush(self._queue, _Queued(priority, self._order, peer, queued))
             self._order += 1
         return transaction_id
@@ -196,13 +213,21 @@ class APRSAdapter:
             return "ignored"
         ack = _ACK_RE.fullmatch(body)
         if ack is not None:
-            return "acknowledged" if self._pending.pop((peer, ack.group(1)), None) else "ignored"
+            return (
+                "acknowledged"
+                if self._pending.pop((peer, ack.group(1)), None)
+                else "ignored"
+            )
         try:
             fragment = parse_fragment(body)
         except (CarriageError, TypeError):
             return "ignored"
         if fragment.message_id is not None:
-            self._immediate.append(OutboundPacket(SERVICE_CALLSIGN, peer, f"ack{fragment.message_id}", True))
+            self._immediate.append(
+                OutboundPacket(
+                    self.service_callsign, peer, f"ack{fragment.message_id}", True
+                )
+            )
         try:
             frame = self.reassembly.add(peer, fragment, now)
         except TransactionConflict:
@@ -221,14 +246,25 @@ class APRSAdapter:
         # Reassembly already validates via the production decoder; decoding here
         # classifies it as a valid client request before activity is refreshed.
         request = decode_frame(frame)
-        if not isinstance(request, (SendMessage, GetNewMessages, GetNewBulletins,
-                                    GetBulletin, GetCapabilities)):
+        if not isinstance(
+            request,
+            (
+                SendMessage,
+                GetNewMessages,
+                GetNewBulletins,
+                GetBulletin,
+                GetCapabilities,
+            ),
+        ):
             return "invalid"
         callsign = normalize_callsign(peer, "APRS source")
         responses = tuple(self.core.handle_frame(callsign, frame))
         self.replay.put(peer, fragment.transaction_id, frame, responses, now)
         self._expire_activity(now)
-        if peer not in self._activity and len(self._activity) >= self.config.max_activity_peers:
+        if (
+            peer not in self._activity
+            and len(self._activity) >= self.config.max_activity_peers
+        ):
             oldest = min(self._activity, key=lambda item: self._activity[item][1])
             del self._activity[oldest]
         self._activity[peer] = (callsign, now)
@@ -249,7 +285,10 @@ class APRSAdapter:
                 self.failed_packets.append(pending.packet)
                 del self.failed_packets[: -self.config.event_history_capacity]
                 del self._pending[key]
-            elif now - self._last_send[pending.packet.destination] >= self.config.min_interval:
+            elif (
+                now - self._last_send[pending.packet.destination]
+                >= self.config.min_interval
+            ):
                 pending.attempts += 1
                 pending.deadline = now + self.config.ack_timeout
                 self._last_send[pending.packet.destination] = now
@@ -257,9 +296,14 @@ class APRSAdapter:
         if self._queue:
             item = self._queue[0]
             peer_has_pending = any(peer == item.peer for peer, _ in self._pending)
-            if not peer_has_pending and now - self._last_send[item.peer] >= self.config.min_interval:
+            if (
+                not peer_has_pending
+                and now - self._last_send[item.peer] >= self.config.min_interval
+            ):
                 heapq.heappop(self._queue)
-                packet = OutboundPacket(SERVICE_CALLSIGN, item.peer, item.fragment.body)
+                packet = OutboundPacket(
+                    self.service_callsign, item.peer, item.fragment.body
+                )
                 self._pending[(item.peer, item.fragment.message_id or "")] = _Pending(
                     packet, 1, now + self.config.ack_timeout, item.priority
                 )
@@ -288,8 +332,13 @@ class APRSAdapter:
     def _on_message(self, message: Message) -> None:
         now = self.clock()
         for peer, (callsign, active_at) in tuple(self._activity.items()):
-            if callsign == message.recipient and now - active_at < self.config.activity_timeout:
-                self.queue_frame(peer, encode_frame(message, unsolicited=True), proactive=True)
+            if (
+                callsign == message.recipient
+                and now - active_at < self.config.activity_timeout
+            ):
+                self.queue_frame(
+                    peer, encode_frame(message, unsolicited=True), proactive=True
+                )
 
     @property
     def queued_count(self) -> int:
