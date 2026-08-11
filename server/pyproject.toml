@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-openqsp-server = "openqsp.server.tcp:main"
+openqsp-server = "openqsp.server.app:main"
 openqsp-client = "openqsp.client.cli:main"
 
 [project.optional-dependencies]

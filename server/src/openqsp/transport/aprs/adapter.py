@@ -31,7 +31,7 @@ from .carriage import (
 )
 from .state import Reassembler, ReplayCache, TransactionConflict
 
-SERVICE_CALLSIGN = "OPENQSP"
+SERVICE_CALLSIGN = "OPENQSP"  # Backwards-compatible profile default.
 _PEER_RE = re.compile(r"[A-Z0-9]{3,12}(?:-[0-9]{1,2})?")
 _ACK_RE = re.compile(r"ack([0-9A-Z]{1,5})")
 
@@ -91,8 +91,10 @@ class APRSAdapter:
     """Synchronous state machine; callers inject packets and advance a clock."""
 
     def __init__(self, core: ServerCore, *, config: AdapterConfig | None = None,
-                 clock: Callable[[], float] | None = None) -> None:
+                 clock: Callable[[], float] | None = None,
+                 service_callsign: str = SERVICE_CALLSIGN) -> None:
         self.core, self.config = core, config or AdapterConfig()
+        self.service_callsign = self.validate_peer(service_callsign.upper())
         self.clock = clock or time.monotonic
         self.reassembly = Reassembler(ttl=self.config.reassembly_ttl, max_entries=self.config.max_reassemblies)
         self.replay = ReplayCache(ttl=self.config.replay_ttl, max_entries=self.config.max_replays,
@@ -202,7 +204,7 @@ class APRSAdapter:
         except (CarriageError, TypeError):
             return "ignored"
         if fragment.message_id is not None:
-            self._immediate.append(OutboundPacket(SERVICE_CALLSIGN, peer, f"ack{fragment.message_id}", True))
+            self._immediate.append(OutboundPacket(self.service_callsign, peer, f"ack{fragment.message_id}", True))
         try:
             frame = self.reassembly.add(peer, fragment, now)
         except TransactionConflict:
@@ -259,7 +261,7 @@ class APRSAdapter:
             peer_has_pending = any(peer == item.peer for peer, _ in self._pending)
             if not peer_has_pending and now - self._last_send[item.peer] >= self.config.min_interval:
                 heapq.heappop(self._queue)
-                packet = OutboundPacket(SERVICE_CALLSIGN, item.peer, item.fragment.body)
+                packet = OutboundPacket(self.service_callsign, item.peer, item.fragment.body)
                 self._pending[(item.peer, item.fragment.message_id or "")] = _Pending(
                     packet, 1, now + self.config.ack_timeout, item.priority
                 )
