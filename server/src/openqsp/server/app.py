@@ -38,8 +38,9 @@ class OpenQSPServer:
         self.message_store = MessageStore(self.database)
         self.bulletin_store = BulletinStore(self.database)
         self.account_store = AccountStore(self.database)
-        self.core = ServerCore(message_store=self.message_store,
-                               bulletin_store=self.bulletin_store)
+        self.core = ServerCore(
+            message_store=self.message_store, bulletin_store=self.bulletin_store
+        )
         self.tcp: TCPServer | None = None
         self.aprs_adapter: APRSAdapter | None = None
         self.aprs_client: APRSISClient | None = None
@@ -55,12 +56,15 @@ class OpenQSPServer:
         logger.info("Database: %s", self.config.database)
         if self.config.tcp_enabled:
             self.tcp = self._tcp_factory(
-                self.core, host=self.config.tcp_host, port=self.config.tcp_port,
+                self.core,
+                host=self.config.tcp_host,
+                port=self.config.tcp_port,
                 account_store=self.account_store,
             )
             await self.tcp.start()
-            logger.info("TCP: listening on %s:%s", self.config.tcp_host,
-                        self.config.tcp_port)
+            logger.info(
+                "TCP: listening on %s:%s", self.config.tcp_host, self.config.tcp_port
+            )
         if self.config.aprs_enabled:
             assert self.config.aprs_callsign and self.config.aprs_passcode
             self.aprs_adapter = self._adapter_factory(
@@ -74,7 +78,9 @@ class OpenQSPServer:
                 filter=self.config.effective_aprs_filter,
             )
             self.aprs_client = self._client_factory(self.aprs_adapter, aprs_config)
-            self._aprs_task = asyncio.create_task(self.aprs_client.run(), name="aprs-is")
+            self._aprs_task = asyncio.create_task(
+                self.aprs_client.run(), name="aprs-is"
+            )
         logger.info("OpenQSP server ready")
 
     async def serve_forever(self) -> None:
@@ -103,8 +109,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--database", type=Path)
     parser.add_argument("--host", help="TCP listen host")
     parser.add_argument("--port", type=int, help="TCP listen port")
-    parser.add_argument("--create-account", nargs=2,
-                        metavar=("CALLSIGN", "PASSWORD"))
+    parser.add_argument("--create-account", nargs=2, metavar=("CALLSIGN", "PASSWORD"))
     return parser
 
 
@@ -124,7 +129,9 @@ async def _run(config: ServerConfig) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     try:
         load_dotenv()
         args = _parser().parse_args(argv)

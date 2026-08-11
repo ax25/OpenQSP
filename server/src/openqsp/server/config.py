@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from collections.abc import Mapping
 
 
 class ConfigurationError(ValueError):
     """Operator configuration is missing or invalid."""
 
 
-def load_dotenv(path: str | Path = ".env", *, environ: dict[str, str] | None = None) -> None:
+def load_dotenv(
+    path: str | Path = ".env", *, environ: dict[str, str] | None = None
+) -> None:
     """Load simple KEY=VALUE entries without replacing real environment values."""
     target = os.environ if environ is None else environ
     file = Path(path)
@@ -67,15 +69,21 @@ class ServerConfig:
     aprs_filter: str | None = None
 
     @classmethod
-    def from_environment(cls, environ: Mapping[str, str] | None = None) -> "ServerConfig":
+    def from_environment(
+        cls, environ: Mapping[str, str] | None = None
+    ) -> "ServerConfig":
         env = os.environ if environ is None else environ
         get = env.get
         config = cls(
             database=Path(get("OPENQSP_DATABASE", "openqsp.db")),
-            tcp_enabled=_boolean("OPENQSP_TCP_ENABLED", get("OPENQSP_TCP_ENABLED", "true")),
+            tcp_enabled=_boolean(
+                "OPENQSP_TCP_ENABLED", get("OPENQSP_TCP_ENABLED", "true")
+            ),
             tcp_host=get("OPENQSP_TCP_HOST", "127.0.0.1"),
             tcp_port=_port("OPENQSP_TCP_PORT", get("OPENQSP_TCP_PORT", "8023")),
-            aprs_enabled=_boolean("OPENQSP_APRS_ENABLED", get("OPENQSP_APRS_ENABLED", "false")),
+            aprs_enabled=_boolean(
+                "OPENQSP_APRS_ENABLED", get("OPENQSP_APRS_ENABLED", "false")
+            ),
             aprs_callsign=get("OPENQSP_APRS_CALLSIGN") or None,
             aprs_passcode=get("OPENQSP_APRS_PASSCODE") or None,
             aprs_host=get("OPENQSP_APRS_HOST", "rotate.aprs2.net"),
@@ -86,13 +94,17 @@ class ServerConfig:
         return config
 
     def with_overrides(self, **values: object) -> "ServerConfig":
-        result = replace(self, **{key: value for key, value in values.items() if value is not None})
+        result = replace(
+            self, **{key: value for key, value in values.items() if value is not None}
+        )
         result.validate()
         return result
 
     @property
     def effective_aprs_filter(self) -> str | None:
-        return self.aprs_filter or (f"g/{self.aprs_callsign}" if self.aprs_callsign else None)
+        return self.aprs_filter or (
+            f"g/{self.aprs_callsign}" if self.aprs_callsign else None
+        )
 
     def validate(self) -> None:
         _port("OPENQSP_TCP_PORT", str(self.tcp_port))
@@ -100,6 +112,10 @@ class ServerConfig:
         if not self.tcp_enabled and not self.aprs_enabled:
             raise ConfigurationError("at least one transport must be enabled")
         if self.aprs_enabled and not self.aprs_callsign:
-            raise ConfigurationError("OPENQSP_APRS_CALLSIGN is required when APRS is enabled")
+            raise ConfigurationError(
+                "OPENQSP_APRS_CALLSIGN is required when APRS is enabled"
+            )
         if self.aprs_enabled and not self.aprs_passcode:
-            raise ConfigurationError("OPENQSP_APRS_PASSCODE is required when APRS is enabled")
+            raise ConfigurationError(
+                "OPENQSP_APRS_PASSCODE is required when APRS is enabled"
+            )

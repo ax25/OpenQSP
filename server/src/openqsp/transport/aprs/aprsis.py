@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "rotate.aprs2.net"
 DEFAULT_PORT = 14580
 _PACKET_RE = re.compile(r"([^>]+)>[^:]+::(.{9}):(.*)")
-_LOGRESP_RE = re.compile(r"# logresp ([^ ]+) (verified|unverified)(?:,.*)?", re.IGNORECASE)
+_LOGRESP_RE = re.compile(
+    r"# logresp ([^ ]+) (verified|unverified)(?:,.*)?", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -39,8 +41,10 @@ class APRSISConfig:
 
 def login_line(config: APRSISConfig) -> str:
     aprs_filter = config.filter or f"g/{config.callsign}"
-    return (f"user {config.callsign} pass {config.passcode} vers "
-            f"{config.software} {config.version} filter {aprs_filter}")
+    return (
+        f"user {config.callsign} pass {config.passcode} vers "
+        f"{config.software} {config.version} filter {aprs_filter}"
+    )
 
 
 def parse_logresp(line: str, callsign: str = SERVICE_CALLSIGN) -> bool | None:
@@ -58,16 +62,24 @@ def parse_packet(line: str) -> tuple[str, str, str] | None:
     return source.upper(), addressee.strip().upper(), body
 
 
-def format_packet(packet: OutboundPacket, *, destination: str = "APOQSP",
-                  path: str = "TCPIP*") -> str:
-    return f"{packet.source}>{destination},{path}::{packet.destination:<9}:{packet.body}"
+def format_packet(
+    packet: OutboundPacket, *, destination: str = "APOQSP", path: str = "TCPIP*"
+) -> str:
+    return (
+        f"{packet.source}>{destination},{path}::{packet.destination:<9}:{packet.body}"
+    )
 
 
 class APRSISClient:
     """Small reconnecting APRS-IS runner with all credentials injected."""
 
-    def __init__(self, adapter: APRSAdapter, config: APRSISConfig,
-                 *, connector: Callable[..., object] = asyncio.open_connection) -> None:
+    def __init__(
+        self,
+        adapter: APRSAdapter,
+        config: APRSISConfig,
+        *,
+        connector: Callable[..., object] = asyncio.open_connection,
+    ) -> None:
         self.adapter, self.config, self.connector = adapter, config, connector
         self.running = False
         self._writer: asyncio.StreamWriter | None = None
@@ -76,21 +88,31 @@ class APRSISClient:
         self.running = True
         while self.running:
             try:
-                logger.info("APRS-IS: connecting to %s:%s as %s", self.config.host,
-                            self.config.port, self.config.callsign)
-                reader, writer = await self.connector(self.config.host, self.config.port)  # type: ignore[misc]
+                logger.info(
+                    "APRS-IS: connecting to %s:%s as %s",
+                    self.config.host,
+                    self.config.port,
+                    self.config.callsign,
+                )
+                reader, writer = await self.connector(
+                    self.config.host, self.config.port
+                )  # type: ignore[misc]
                 self._writer = writer
                 writer.write((login_line(self.config) + "\r\n").encode())
                 await writer.drain()
                 await self._connection(reader, writer)
                 if self.running:
-                    logger.warning("APRS-IS disconnected; reconnecting in %.1f seconds",
-                                   self.config.reconnect_delay)
+                    logger.warning(
+                        "APRS-IS disconnected; reconnecting in %.1f seconds",
+                        self.config.reconnect_delay,
+                    )
                     await asyncio.sleep(self.config.reconnect_delay)
             except (OSError, ConnectionError, asyncio.IncompleteReadError):
                 if self.running:
-                    logger.warning("APRS-IS disconnected; reconnecting in %.1f seconds",
-                                   self.config.reconnect_delay)
+                    logger.warning(
+                        "APRS-IS disconnected; reconnecting in %.1f seconds",
+                        self.config.reconnect_delay,
+                    )
                     await asyncio.sleep(self.config.reconnect_delay)
             except Exception:
                 if self.running:
@@ -99,7 +121,9 @@ class APRSISClient:
             finally:
                 self._writer = None
 
-    async def _connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _connection(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         verified = False
         try:
             while self.running and not reader.at_eof():
