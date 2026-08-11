@@ -71,7 +71,7 @@ class ServerConfig:
     @classmethod
     def from_environment(
         cls, environ: Mapping[str, str] | None = None
-    ) -> "ServerConfig":
+    ) -> ServerConfig:
         env = os.environ if environ is None else environ
         get = env.get
         config = cls(
@@ -93,7 +93,7 @@ class ServerConfig:
         config.validate()
         return config
 
-    def with_overrides(self, **values: object) -> "ServerConfig":
+    def with_overrides(self, **values: object) -> ServerConfig:
         result = replace(
             self, **{key: value for key, value in values.items() if value is not None}
         )
