@@ -143,6 +143,12 @@ class APRSISClient:
                     if packet is not None and verified:
                         source, addressee, body = packet
                         if addressee == self.config.callsign.upper():
+                            logger.info(
+                                "APRS packet received: from=%s to=%s body=%r",
+                                source,
+                                addressee,
+                                body,
+                            )
                             try:
                                 self.adapter.receive(source, body)
                             except Exception:

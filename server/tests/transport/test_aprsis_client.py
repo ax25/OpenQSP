@@ -54,6 +54,7 @@ def inbound_line(peer: str = "EA3AAA-10") -> str:
 def test_connection_login_receive_emit_ignore_and_cleanup_without_network(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level("INFO")
     adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
     config = APRSISConfig(passcode="secret-from-environment")
     client = APRSISClient(adapter, config)
@@ -63,6 +64,8 @@ def test_connection_login_receive_emit_ignore_and_cleanup_without_network(
             "# logresp OPENQSP verified, server LOCAL",
             "malformed",
             inbound_line().replace("OPENQSP  ", "OTHER    "),
+            "EA3GNU-7>APRS,TCPIP*::OTHER    :Do not log this body",
+            "EA3GNU-7>APRS,TCPIP*::OPENQSP  :Hola OpenQSP",
             inbound_line(),
         ]
     )
@@ -86,6 +89,11 @@ def test_connection_login_receive_emit_ignore_and_cleanup_without_network(
         "filter g/OPENQSP"
     )
     assert "OPENQSP>APOQSP,TCPIP*::EA3AAA-10:ack4F" in output
+    assert (
+        "APRS packet received: from=EA3GNU-7 to=OPENQSP body='Hola OpenQSP'"
+        in caplog.text
+    )
+    assert "Do not log this body" not in caplog.text
     assert "secret-from-environment" not in caplog.text
     assert writer.closed
     assert adapter.queued_count == adapter.pending_count == 0
