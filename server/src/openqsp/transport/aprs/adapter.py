@@ -34,6 +34,7 @@ from .state import Reassembler, ReplayCache, TransactionConflict
 SERVICE_CALLSIGN = "OPENQSP"  # Backwards-compatible profile default.
 _PEER_RE = re.compile(r"[A-Z0-9]{3,12}(?:-[0-9]{1,2})?")
 _ACK_RE = re.compile(r"ack([0-9A-Z]{1,5})")
+_MESSAGE_ID_RE = re.compile(r"\{([0-9A-Z]{1,5})$")
 
 
 @dataclass(frozen=True)
@@ -218,16 +219,17 @@ class APRSAdapter:
                 if self._pending.pop((peer, ack.group(1)), None)
                 else "ignored"
             )
+        message_id = _MESSAGE_ID_RE.search(body)
+        if message_id is not None:
+            self._immediate.append(
+                OutboundPacket(
+                    self.service_callsign, peer, f"ack{message_id.group(1)}", True
+                )
+            )
         try:
             fragment = parse_fragment(body)
         except (CarriageError, TypeError):
             return "ignored"
-        if fragment.message_id is not None:
-            self._immediate.append(
-                OutboundPacket(
-                    self.service_callsign, peer, f"ack{fragment.message_id}", True
-                )
-            )
         try:
             frame = self.reassembly.add(peer, fragment, now)
         except TransactionConflict:
