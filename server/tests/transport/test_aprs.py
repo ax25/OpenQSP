@@ -96,6 +96,52 @@ def test_adapter_acks_replays_and_rejects_conflict() -> None:
     assert any(packet.body.startswith("ack") for packet in packets)
 
 
+def test_adapter_acks_human_message_with_message_id_before_parsing() -> None:
+    adapter = APRSAdapter(CountingCore(), config=AdapterConfig(min_interval=0))
+
+    assert adapter.receive("EA3AAA", "Hola OpenQSP{01", now=0) == "ignored"
+
+    assert adapter.poll(now=0) == [
+        OutboundPacket("OPENQSP", "EA3AAA", "ack01", is_ack=True)
+    ]
+
+
+def test_adapter_does_not_ack_body_without_message_id() -> None:
+    adapter = APRSAdapter(CountingCore(), config=AdapterConfig(min_interval=0))
+
+    assert adapter.receive("EA3AAA", "Hola OpenQSP", now=0) == "ignored"
+    assert adapter.poll(now=0) == []
+
+
+def test_adapter_does_not_ack_incoming_ack() -> None:
+    adapter = APRSAdapter(CountingCore(), config=AdapterConfig(min_interval=0))
+
+    assert adapter.receive("EA3AAA", "ack01", now=0) == "ignored"
+    assert adapter.poll(now=0) == []
+
+
+def test_adapter_acks_valid_fragment_exactly_once() -> None:
+    adapter = APRSAdapter(CountingCore(), config=AdapterConfig(min_interval=0))
+    fragment = fragment_frame(encode_frame(GetCapabilities()), "ABC")[0]
+
+    assert adapter.receive("EA3AAA", f"{fragment.body}{{01", now=0) == "completed"
+
+    packets = adapter.poll(now=0)
+    assert [packet for packet in packets if packet.is_ack] == [
+        OutboundPacket("OPENQSP", "EA3AAA", "ack01", is_ack=True)
+    ]
+
+
+def test_adapter_acks_invalid_openqsp_body_with_message_id() -> None:
+    adapter = APRSAdapter(CountingCore(), config=AdapterConfig(min_interval=0))
+
+    assert adapter.receive("EA3AAA", "Q1:invalid{A1", now=0) == "ignored"
+
+    assert adapter.poll(now=0) == [
+        OutboundPacket("OPENQSP", "EA3AAA", "ackA1", is_ack=True)
+    ]
+
+
 def test_retry_reuses_message_id_and_wrong_peer_ack_is_ignored() -> None:
     adapter = APRSAdapter(CountingCore(), config=AdapterConfig(ack_timeout=1, max_attempts=2, min_interval=0))
     adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities()))
