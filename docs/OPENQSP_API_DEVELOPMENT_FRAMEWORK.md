@@ -264,6 +264,9 @@ Only expose additional fields if they already have meaningful domain semantics. 
 
 ```http
 POST /api/v1/messages
+Authorization: Bearer <token>
+Idempotency-Key: <client-generated-key>
+Content-Type: application/json
 ```
 
 Request:
@@ -301,13 +304,13 @@ Use the same domain/service logic as other transports and preserve current valid
 
 ## 11. Idempotent send
 
-Support:
+Require:
 
 ```http
 Idempotency-Key: <client-generated-key>
 ```
 
-on `POST /api/v1/messages`.
+on every `POST /api/v1/messages` request.
 
 Requirements:
 
