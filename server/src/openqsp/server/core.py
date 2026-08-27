@@ -46,6 +46,7 @@ from openqsp.storage import (
     MessageStore,
     SequenceExhaustedError,
     StorageIntegrityError,
+    StoredMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,14 @@ class RequestContext:
     """Trusted information supplied outside the client-controlled frame."""
 
     authenticated_callsign: str
+
+
+@dataclass(frozen=True)
+class MessageAcceptance:
+    """One durable domain acceptance and whether this call created it."""
+
+    message: StoredMessage
+    created: bool
 
 
 class ServerCore:
@@ -83,6 +92,65 @@ class ServerCore:
             self._message_listeners.remove(listener)
         except ValueError:
             pass
+
+    def send_message(
+        self,
+        *,
+        author: object,
+        recipient: object,
+        body: object,
+        created_at: object,
+        idempotency_key: str | None = None,
+        request_hash: str = "",
+    ) -> MessageAcceptance:
+        """Validate, durably create and publish one private domain message.
+
+        All transports enter message creation here.  HTTP may supply its
+        transport-scoped idempotency metadata, while TCP/APRS use the normal
+        unkeyed path.  Listeners run exactly once, after the transaction commits.
+        """
+        if self._message_store is None:
+            raise StorageIntegrityError("message store unavailable")
+        normalized_author = validate_callsign(author, "author")
+        normalized_recipient = validate_callsign(recipient, "recipient")
+        # The existing codec is the canonical logical-message validator.
+        validated = SendMessage(created_at, normalized_recipient, body)
+        encode_frame(validated)
+        if idempotency_key is None:
+            sequence = self._message_store.store_message(
+                created_at=validated.created_at,
+                author=normalized_author,
+                recipient=normalized_recipient,
+                body=validated.body,
+            )
+            stored = self._message_store.get_message(
+                recipient=normalized_recipient, sequence=sequence
+            )
+            assert stored is not None
+            created = True
+        else:
+            stored, created = self._message_store.store_message_idempotent(
+                created_at=validated.created_at,
+                author=normalized_author,
+                recipient=normalized_recipient,
+                body=validated.body,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+        if created:
+            event = Message(
+                stored.sequence,
+                stored.created_at,
+                stored.author,
+                stored.recipient,
+                stored.body,
+            )
+            for listener in tuple(self._message_listeners):
+                try:
+                    listener(event)
+                except Exception:
+                    logger.exception("message listener failed after durable acceptance")
+        return MessageAcceptance(stored, created)
 
     def handle_frame(
         self, authenticated_callsign: str, frame_bytes: bytes
@@ -157,7 +225,7 @@ class ServerCore:
             ]
 
         try:
-            sequence = self._message_store.store_message(
+            self.send_message(
                 created_at=request.created_at,
                 author=author,
                 recipient=request.recipient,
@@ -180,16 +248,6 @@ class ServerCore:
                 )
             ]
 
-        message = Message(
-            sequence, request.created_at, author, request.recipient, request.body
-        )
-        for listener in tuple(self._message_listeners):
-            try:
-                listener(message)
-            except Exception:
-                # Push is best effort and must never change durable acceptance,
-                # but unexpected adapter failures must remain observable.
-                logger.exception("message listener failed after durable acceptance")
         return [Stored()]
 
     def _handle_get_new_messages(

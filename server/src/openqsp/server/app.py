@@ -90,10 +90,10 @@ class OpenQSPServer:
 
             assert self.config.api_token_secret
             hub = EventHub()
-            self.core.add_message_listener(hub.listener)
             api = create_api(
                 accounts=self.account_store,
                 messages=self.message_store,
+                core=self.core,
                 secret=self.config.api_token_secret,
                 token_lifetime=self.config.api_token_lifetime,
                 cors_origins=self.config.api_cors_origins,

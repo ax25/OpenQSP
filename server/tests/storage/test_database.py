@@ -218,6 +218,15 @@ def test_interleaved_v1_messages_are_resequenced_per_mailbox_with_all_content(tm
         state = dict(
             connection.execute("SELECT recipient,last_value FROM mailbox_sequences")
         )
+        api_order = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT api_sequence,recipient,mailbox_sequence FROM messages ORDER BY api_sequence"
+            )
+        ]
+        api_high_water = connection.execute(
+            "SELECT last_value FROM api_message_sequence WHERE singleton=1"
+        ).fetchone()[0]
     assert rows == [
         ("EA1ABC", 1, "B", 102, 502, b"message 2"),
         ("EA1ABC", 2, "D", 104, 504, b"message 4"),
@@ -225,6 +234,13 @@ def test_interleaved_v1_messages_are_resequenced_per_mailbox_with_all_content(tm
         ("EA3GNU", 2, "C", 103, 503, b"message 3"),
     ]
     assert state == {"EA1ABC": 2, "EA3GNU": 2}
+    assert api_order == [
+        (1, "EA3GNU", 1),
+        (2, "EA1ABC", 1),
+        (3, "EA3GNU", 2),
+        (4, "EA1ABC", 2),
+    ]
+    assert api_high_water == 4
 
 
 def test_one_mailbox_migrates_and_next_message_continues(tmp_path):
@@ -241,6 +257,39 @@ def test_one_mailbox_migrates_and_next_message_continues(tmp_path):
         )
         == 3
     )
+
+
+def test_v3_to_v4_backfills_deterministic_api_order_and_continues(tmp_path):
+    path = tmp_path / "v3.db"
+    connection = sqlite3.connect(path, isolation_level=None)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    migrate(connection, 0, target_version=3)
+    connection.execute("INSERT INTO mailbox_sequences VALUES ('EA3GNU', 1)")
+    connection.execute("INSERT INTO mailbox_sequences VALUES ('EA3ABC', 1)")
+    connection.execute("INSERT INTO messages VALUES ('EA3GNU',1,10,500,'SRC',X'61')")
+    connection.execute("INSERT INTO messages VALUES ('EA3ABC',1,10,500,'SRC',X'62')")
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+    with database.connect() as connection:
+        rows = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT api_sequence,recipient,body FROM messages ORDER BY api_sequence"
+            )
+        ]
+        high_water = connection.execute(
+            "SELECT last_value FROM api_message_sequence"
+        ).fetchone()[0]
+    assert rows == [(1, "EA3ABC", b"b"), (2, "EA3GNU", b"a")]
+    assert high_water == 2
+
+    MessageStore(database).store_message(
+        created_at=11, author="SRC", recipient="EA3GNU", body="next"
+    )
+    assert MessageStore(database).api_high_water() == 3
 
 
 def test_v1_bulletins_preserve_order_and_all_content_then_continue(tmp_path):

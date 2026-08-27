@@ -18,7 +18,10 @@ Use `pip install -e '.[test]'` when developing or running the complete suite.
 ## Internet API v1
 
 The FastAPI Internet adapter shares the same SQLite database, account store and
-message domain persistence as TCP/APRS. Enable it with a private signing secret:
+message domain operation as TCP/APRS. Every transport calls `ServerCore.send_message`,
+which validates, persists, allocates sequences, and publishes the single
+post-commit event consumed by WebSocket clients. Enable it with a private signing
+secret:
 
 ```bash
 cd server
@@ -34,6 +37,14 @@ Optional settings are `OPENQSP_API_HOST` (default `127.0.0.1`),
 (default `3600`), and comma-separated `OPENQSP_API_CORS_ORIGINS`. CORS is off
 unless origins are explicitly configured; for local Flutter web development,
 for example, set `OPENQSP_API_CORS_ORIGINS=http://localhost:3000`.
+
+The safe development bind remains `127.0.0.1`. In the production reverse-proxy
+topology, Apache terminates HTTPS/WSS and proxies ordinary HTTP/WebSocket traffic
+to OpenQSP; OpenQSP itself does not need TLS configuration. If the proxy and API
+run on different machines, set `OPENQSP_API_HOST` to the API server's LAN address,
+or to `0.0.0.0` with an appropriate host firewall. The external URLs can remain
+`https://openqsp.ddns.net/api/v1/...` and
+`wss://openqsp.ddns.net/api/v1/ws` while the internal hop uses `http://`/`ws://`.
 
 Provision accounts with `openqsp-server --create-account` as described below.
 Interactive Swagger documentation is at <http://127.0.0.1:8000/docs> and the

@@ -1,14 +1,16 @@
 """Internet API v1 contract and acceptance tests."""
 
 import concurrent.futures
+import time
 
 import pytest
+from fastapi.testclient import TestClient
 
-fastapi = pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
-
-from openqsp.api import create_api  # noqa: E402
-from openqsp.storage import AccountStore, Database, MessageStore  # noqa: E402
+from openqsp.api import create_api
+from openqsp.api.app import APIError, Signer
+from openqsp.protocol import SendMessage, Stored, decode_frame, encode_frame
+from openqsp.server import ServerCore
+from openqsp.storage import AccountStore, Database, MessageStore
 
 
 @pytest.fixture
@@ -18,9 +20,15 @@ def api(tmp_path):
     accounts = AccountStore(database)
     for callsign in ("EA3GNU", "EA3ABC", "EA3XYZ"):
         accounts.create_account(callsign, "password")
+    messages = MessageStore(database)
+    core = ServerCore(message_store=messages)
     app = create_api(
-        accounts=accounts, messages=MessageStore(database), secret="test-secret"
+        accounts=accounts,
+        messages=messages,
+        core=core,
+        secret="test-secret",
     )
+    app.state.core = core
     with TestClient(app) as client:
         yield client
 
@@ -49,6 +57,18 @@ def test_authentication_and_me(api):
         api.get("/api/v1/me", headers={"Authorization": "Bearer bad"}).status_code
         == 401
     )
+    token = response.json()["access_token"]
+    payload, signature = token.split(".")
+    changed = payload + "." + ("A" if signature[0] != "A" else "B") + signature[1:]
+    assert (
+        api.get(
+            "/api/v1/me", headers={"Authorization": f"Bearer {changed}"}
+        ).status_code
+        == 401
+    )
+    with pytest.raises(APIError):
+        signer = Signer("test-secret", -1)
+        signer.identity(signer.access("EA3GNU"))
 
 
 def test_send_visibility_authorization_filter_and_idempotency(api):
@@ -142,7 +162,7 @@ def test_sync_isolation_advancement_and_invalid_cursor(api):
         api.get("/api/v1/sync?cursor=" + changed["cursor"], headers=gnu).status_code
         == 400
     )
-    assert api.get("/api/v1/sync?cursor=bad", headers=abc).status_code in (400, 401)
+    assert api.get("/api/v1/sync?cursor=bad", headers=abc).status_code == 400
 
 
 def test_concurrent_idempotency(api):
@@ -159,6 +179,21 @@ def test_concurrent_idempotency(api):
         results = list(pool.map(submit, range(8)))
     assert all(result == results[0] for result in results)
     assert len(api.get("/api/v1/messages", headers=headers).json()["messages"]) == 1
+
+
+def test_sync_orders_core_messages_with_equal_timestamps(api):
+    _, abc = login(api, "EA3ABC")
+    cursor = api.get("/api/v1/sync", headers=abc).json()["cursor"]
+    core = api.app.state.core
+    for body in ("equal one", "equal two"):
+        core.send_message(
+            author="EA3GNU", recipient="EA3ABC", body=body, created_at=100
+        )
+    result = api.get("/api/v1/sync?cursor=" + cursor, headers=abc).json()
+    assert [message["body"] for message in result["messages"]] == [
+        "equal one",
+        "equal two",
+    ]
 
 
 def test_acceptance_websocket_disconnect_and_sync_recovery(api):
@@ -184,3 +219,44 @@ def test_acceptance_websocket_disconnect_and_sync_recovery(api):
         ]
         == []
     )
+
+
+def test_http_uses_core_once_and_core_ingress_reaches_websocket_and_sync(api):
+    """Both ingress directions share ServerCore, persistence and notifications."""
+    _, gnu = login(api)
+    abc_login, abc = login(api, "EA3ABC")
+    core = api.app.state.core
+    observed = []
+    core.add_message_listener(observed.append)
+    cursor = api.get("/api/v1/sync", headers=abc).json()["cursor"]
+    with api.websocket_connect(
+        f"/api/v1/ws?token={abc_login.json()['access_token']}"
+    ) as socket:
+        sent = api.post(
+            "/api/v1/messages",
+            headers={**gnu, "Idempotency-Key": "shared-core"},
+            json={"to": "EA3ABC", "body": "from HTTP"},
+        )
+        assert socket.receive_json()["data"] == sent.json()["message"]
+        repeated = api.post(
+            "/api/v1/messages",
+            headers={**gnu, "Idempotency-Key": "shared-core"},
+            json={"to": "EA3ABC", "body": "from HTTP"},
+        )
+        assert repeated.json() == sent.json()
+        assert len(observed) == 1
+
+        responses = core.handle_frame(
+            "EA3GNU",
+            encode_frame(SendMessage(int(time.time()), "EA3ABC", "from core")),
+        )
+        assert isinstance(decode_frame(responses[0]), Stored)
+        core_event = socket.receive_json()
+        assert core_event["type"] == "message.created"
+        assert core_event["data"]["body"] == "from core"
+
+    listed = api.get("/api/v1/messages", headers=abc).json()["messages"]
+    assert [message["body"] for message in listed] == ["from HTTP", "from core"]
+    synced = api.get("/api/v1/sync?cursor=" + cursor, headers=abc).json()["messages"]
+    assert [message["body"] for message in synced] == ["from HTTP", "from core"]
+    assert len(observed) == 2

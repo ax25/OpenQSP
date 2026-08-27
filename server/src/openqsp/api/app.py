@@ -27,8 +27,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict
 
-from openqsp.protocol import Message, SendMessage, encode_frame, normalize_callsign
+from openqsp.protocol import Message, normalize_callsign
 from openqsp.protocol.errors import InvalidFieldError
+from openqsp.server.core import ServerCore
 from openqsp.storage import (
     AccountStore,
     IdempotencyConflictError,
@@ -120,7 +121,10 @@ class Signer:
         return self.sign({"kind": kind, "sub": callsign, "seq": sequence})
 
     def cursor_value(self, token: str, callsign: str, kind: str) -> int:
-        data = self.read(token)
+        try:
+            data = self.read(token)
+        except APIError:
+            raise APIError(400, "invalid_request", "Invalid cursor.") from None
         if (
             data.get("kind") != kind
             or data.get("sub") != callsign
@@ -196,6 +200,7 @@ def create_api(
     *,
     accounts: AccountStore,
     messages: MessageStore,
+    core: ServerCore,
     secret: str,
     token_lifetime: int = 3600,
     cors_origins: tuple[str, ...] = (),
@@ -205,6 +210,7 @@ def create_api(
     signer, events = Signer(secret, token_lifetime), hub or EventHub()
     bearer = HTTPBearer(auto_error=False)
     app.state.events = events
+    core.add_message_listener(events.listener)
     if cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -288,15 +294,9 @@ def create_api(
     ) -> dict[str, Any]:
         try:
             recipient = normalize_callsign(body.to)
-            encode_frame(SendMessage(int(time.time()), recipient, body.body))
         except InvalidFieldError as error:
-            code = (
-                "message_too_long"
-                if "body" in str(error) and "between" in str(error)
-                else "validation_error"
-            )
             raise APIError(
-                422, code, "Invalid request.", {"request": str(error)}
+                422, "validation_error", "Invalid request.", {"to": str(error)}
             ) from None
         if idempotency_key is not None and (not 1 <= len(idempotency_key) <= 128):
             raise APIError(
@@ -309,7 +309,7 @@ def create_api(
             json.dumps({"to": recipient, "body": body.body}, sort_keys=True).encode()
         ).hexdigest()
         try:
-            stored, created = messages.api_store_message(
+            acceptance = core.send_message(
                 created_at=int(time.time()),
                 author=callsign,
                 recipient=recipient,
@@ -317,13 +317,16 @@ def create_api(
                 idempotency_key=idempotency_key,
                 request_hash=digest,
             )
+        except InvalidFieldError as error:
+            code = "message_too_long" if "body" in str(error) else "validation_error"
+            raise APIError(
+                422, code, "Invalid request.", {"request": str(error)}
+            ) from None
         except IdempotencyConflictError:
             raise APIError(
                 409, "conflict", "Idempotency key was used for a different request."
             ) from None
-        result = _message(stored)
-        if created:
-            await events.emit(result)
+        result = _message(acceptance.message)
         return {"message": result}
 
     @app.get("/api/v1/messages")
@@ -358,7 +361,7 @@ def create_api(
         message_id: str, callsign: Annotated[str, Depends(user)]
     ) -> dict[str, Any]:
         recipient, sequence = _parse_message_id(message_id)
-        value = messages.api_get(recipient=recipient, sequence=sequence)
+        value = messages.get_message(recipient=recipient, sequence=sequence)
         if value is None or callsign not in (value.author, value.recipient):
             raise APIError(404, "not_found", "Message not found.")
         return {"message": _message(value)}

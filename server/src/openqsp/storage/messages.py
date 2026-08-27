@@ -160,7 +160,7 @@ class MessageStore:
                 connection.rollback()
                 raise
 
-    def api_store_message(
+    def store_message_idempotent(
         self,
         *,
         created_at: int,
@@ -170,7 +170,12 @@ class MessageStore:
         idempotency_key: str | None,
         request_hash: str,
     ) -> tuple[StoredMessage, bool]:
-        """Atomically store an Internet send, or return its idempotent result."""
+        """Atomically store a message, or return its keyed original result.
+
+        Idempotency keys are transport metadata; the persisted message remains
+        an ordinary OpenQSP domain message and uses the same sequences as every
+        other ingress path.
+        """
         with closing(self._database.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -265,7 +270,7 @@ class MessageStore:
             ).fetchall()
         return tuple(_stored_message(r) for r in rows[:limit]), len(rows) > limit
 
-    def api_get(self, *, recipient: str, sequence: int) -> StoredMessage | None:
+    def get_message(self, *, recipient: str, sequence: int) -> StoredMessage | None:
         with closing(self._database.connect()) as connection:
             row = connection.execute(
                 """SELECT mailbox_sequence,api_sequence,created_at,accepted_at,author,
