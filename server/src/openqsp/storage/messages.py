@@ -29,6 +29,7 @@ class StoredMessage:
     author: str
     recipient: str
     body: str
+    api_sequence: int = 0
 
 
 @dataclass(frozen=True)
@@ -127,21 +128,163 @@ class MessageStore:
                     raise SequenceExhaustedError("mailbox sequence is exhausted")
                 sequence = last + 1
                 accepted_at = validate_clock_value(self._clock())
+                api_row = connection.execute(
+                    "SELECT last_value FROM api_message_sequence WHERE singleton = 1"
+                ).fetchone()
+                api_sequence = int(api_row[0]) + 1
+                connection.execute(
+                    "UPDATE api_message_sequence SET last_value = ? WHERE singleton = 1",
+                    (api_sequence,),
+                )
                 connection.execute(
                     """INSERT INTO mailbox_sequences(recipient, last_value) VALUES (?, ?)
                        ON CONFLICT(recipient) DO UPDATE SET last_value = excluded.last_value""",
                     (recipient, sequence),
                 )
                 connection.execute(
-                    """INSERT INTO messages(recipient, mailbox_sequence, created_at, accepted_at, author, body)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (recipient, sequence, created_at, accepted_at, author, body_bytes),
+                    """INSERT INTO messages(recipient, mailbox_sequence, api_sequence,
+                       created_at, accepted_at, author, body) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        recipient,
+                        sequence,
+                        api_sequence,
+                        created_at,
+                        accepted_at,
+                        author,
+                        body_bytes,
+                    ),
                 )
                 connection.commit()
                 return sequence
             except BaseException:
                 connection.rollback()
                 raise
+
+    def api_store_message(
+        self,
+        *,
+        created_at: int,
+        author: str,
+        recipient: str,
+        body: str,
+        idempotency_key: str | None,
+        request_hash: str,
+    ) -> tuple[StoredMessage, bool]:
+        """Atomically store an Internet send, or return its idempotent result."""
+        with closing(self._database.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if idempotency_key is not None:
+                    old = connection.execute(
+                        """SELECT request_hash, recipient, mailbox_sequence FROM api_idempotency
+                           WHERE author=? AND operation='send' AND idempotency_key=?""",
+                        (author, idempotency_key),
+                    ).fetchone()
+                    if old is not None:
+                        if old["request_hash"] != request_hash:
+                            raise IdempotencyConflictError(
+                                "key reused with another request"
+                            )
+                        row = connection.execute(
+                            """SELECT mailbox_sequence, api_sequence, created_at, accepted_at,
+                                      author, recipient, body FROM messages
+                               WHERE recipient=? AND mailbox_sequence=?""",
+                            (old["recipient"], old["mailbox_sequence"]),
+                        ).fetchone()
+                        connection.commit()
+                        return _stored_message(row), False
+                mailbox = connection.execute(
+                    "SELECT last_value FROM mailbox_sequences WHERE recipient=?",
+                    (recipient,),
+                ).fetchone()
+                sequence = (int(mailbox[0]) if mailbox else 0) + 1
+                if sequence > MAX_U32:
+                    raise SequenceExhaustedError("mailbox sequence is exhausted")
+                api_sequence = (
+                    int(
+                        connection.execute(
+                            "SELECT last_value FROM api_message_sequence WHERE singleton=1"
+                        ).fetchone()[0]
+                    )
+                    + 1
+                )
+                accepted_at = validate_clock_value(self._clock())
+                connection.execute(
+                    """INSERT INTO mailbox_sequences(recipient,last_value) VALUES(?,?)
+                       ON CONFLICT(recipient) DO UPDATE SET last_value=excluded.last_value""",
+                    (recipient, sequence),
+                )
+                connection.execute(
+                    "UPDATE api_message_sequence SET last_value=? WHERE singleton=1",
+                    (api_sequence,),
+                )
+                connection.execute(
+                    """INSERT INTO messages(recipient,mailbox_sequence,api_sequence,created_at,
+                       accepted_at,author,body) VALUES(?,?,?,?,?,?,?)""",
+                    (
+                        recipient,
+                        sequence,
+                        api_sequence,
+                        created_at,
+                        accepted_at,
+                        author,
+                        body.encode(),
+                    ),
+                )
+                if idempotency_key is not None:
+                    connection.execute(
+                        "INSERT INTO api_idempotency VALUES(?, 'send', ?, ?, ?, ?)",
+                        (author, idempotency_key, request_hash, recipient, sequence),
+                    )
+                row = connection.execute(
+                    """SELECT mailbox_sequence,api_sequence,created_at,accepted_at,author,
+                              recipient,body FROM messages WHERE api_sequence=?""",
+                    (api_sequence,),
+                ).fetchone()
+                connection.commit()
+                return _stored_message(row), True
+            except BaseException:
+                connection.rollback()
+                raise
+
+    def api_list(
+        self, *, callsign: str, after: int = 0, limit: int = 50, peer: str | None = None
+    ) -> tuple[tuple[StoredMessage, ...], bool]:
+        where = "(author=? OR recipient=?) AND api_sequence>?"
+        args: list[object] = [callsign, callsign, after]
+        if peer is not None:
+            where += " AND ((author=? AND recipient=?) OR (author=? AND recipient=?))"
+            args.extend((callsign, peer, peer, callsign))
+        args.append(limit + 1)
+        with closing(self._database.connect()) as connection:
+            rows = connection.execute(
+                f"""SELECT mailbox_sequence,api_sequence,created_at,accepted_at,author,
+                            recipient,body FROM messages WHERE {where}
+                     ORDER BY api_sequence LIMIT ?""",
+                args,
+            ).fetchall()
+        return tuple(_stored_message(r) for r in rows[:limit]), len(rows) > limit
+
+    def api_get(self, *, recipient: str, sequence: int) -> StoredMessage | None:
+        with closing(self._database.connect()) as connection:
+            row = connection.execute(
+                """SELECT mailbox_sequence,api_sequence,created_at,accepted_at,author,
+                          recipient,body FROM messages WHERE recipient=? AND mailbox_sequence=?""",
+                (recipient, sequence),
+            ).fetchone()
+        return None if row is None else _stored_message(row)
+
+    def api_high_water(self) -> int:
+        with closing(self._database.connect()) as connection:
+            return int(
+                connection.execute(
+                    "SELECT last_value FROM api_message_sequence WHERE singleton=1"
+                ).fetchone()[0]
+            )
+
+
+class IdempotencyConflictError(ValueError):
+    pass
 
 
 def _stored_message(row: sqlite3.Row) -> StoredMessage:
@@ -165,4 +308,7 @@ def _stored_message(row: sqlite3.Row) -> StoredMessage:
         text = body.decode("utf-8")
     except UnicodeDecodeError as error:
         raise StorageIntegrityError("message body is not valid UTF-8") from error
-    return StoredMessage(sequence, created_at, accepted_at, author, recipient, text)
+    api_sequence = int(row["api_sequence"]) if "api_sequence" in row.keys() else 0
+    return StoredMessage(
+        sequence, created_at, accepted_at, author, recipient, text, api_sequence
+    )

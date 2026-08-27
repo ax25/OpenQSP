@@ -45,6 +45,8 @@ class OpenQSPServer:
         self.aprs_adapter: APRSAdapter | None = None
         self.aprs_client: APRSISClient | None = None
         self._aprs_task: asyncio.Task[None] | None = None
+        self._api_server: object | None = None
+        self._api_task: asyncio.Task[None] | None = None
         self._closed = asyncio.Event()
         self._close_started = False
         self._tcp_factory = tcp_factory
@@ -81,6 +83,36 @@ class OpenQSPServer:
             self._aprs_task = asyncio.create_task(
                 self.aprs_client.run(), name="aprs-is"
             )
+        if self.config.api_enabled:
+            import uvicorn
+
+            from openqsp.api import EventHub, create_api
+
+            assert self.config.api_token_secret
+            hub = EventHub()
+            self.core.add_message_listener(hub.listener)
+            api = create_api(
+                accounts=self.account_store,
+                messages=self.message_store,
+                secret=self.config.api_token_secret,
+                token_lifetime=self.config.api_token_lifetime,
+                cors_origins=self.config.api_cors_origins,
+                hub=hub,
+            )
+            self._api_server = uvicorn.Server(
+                uvicorn.Config(
+                    api,
+                    host=self.config.api_host,
+                    port=self.config.api_port,
+                    log_level="info",
+                )
+            )
+            self._api_task = asyncio.create_task(
+                self._api_server.serve(), name="internet-api"
+            )
+            logger.info(
+                "API: listening on %s:%s", self.config.api_host, self.config.api_port
+            )
         logger.info("OpenQSP server ready")
 
     async def serve_forever(self) -> None:
@@ -96,6 +128,11 @@ class OpenQSPServer:
             self._aprs_task.cancel()
             await asyncio.gather(self._aprs_task, return_exceptions=True)
             self._aprs_task = None
+        if self._api_server is not None:
+            setattr(self._api_server, "should_exit", True)
+        if self._api_task is not None:
+            await self._api_task
+            self._api_task = None
         if self.aprs_adapter is not None:
             self.aprs_adapter.close()
         if self.tcp is not None:

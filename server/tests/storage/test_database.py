@@ -19,6 +19,7 @@ from openqsp.storage.migrations import (
 
 V2_TABLES = {"messages", "mailbox_sequences", "bulletins", "bulletin_sequence"}
 V3_TABLES = V2_TABLES | {"accounts"}
+V4_TABLES = V3_TABLES | {"api_message_sequence", "api_idempotency"}
 MIGRATION_1_DIGEST = "12be5fcae6e0a0267b3c7bbcfbfdc5cb7e109be07080cce067c1de39bd8b7777"
 
 
@@ -84,9 +85,9 @@ def test_migration_one_definition_is_unchanged():
 def test_fresh_database_runs_ordered_migrations_to_latest(tmp_path):
     database = Database(tmp_path / "node.db")
     database.initialize()
-    assert database.get_schema_version() == LATEST_SCHEMA_VERSION == 3
+    assert database.get_schema_version() == LATEST_SCHEMA_VERSION == 4
     with database.connect() as connection:
-        assert schema_names(connection) - {"sqlite_sequence"} == V3_TABLES
+        assert schema_names(connection) - {"sqlite_sequence"} == V4_TABLES
 
 
 def test_initialize_is_idempotent_and_preserves_rows(tmp_path):
@@ -110,7 +111,7 @@ def test_database_can_be_reopened_and_initialized(tmp_path):
     Database(path).initialize()
     reopened = Database(path)
     reopened.initialize()
-    assert reopened.get_schema_version() == 3
+    assert reopened.get_schema_version() == 4
 
 
 def test_unsupported_future_schema_is_rejected(tmp_path):
@@ -155,10 +156,10 @@ def test_message_and_bulletin_sequence_state_are_independent(tmp_path):
 @pytest.mark.parametrize(
     "sql",
     [
-        "INSERT INTO messages VALUES ('BOX',0,1,1,'A',X'00')",
-        "INSERT INTO messages VALUES ('BOX',4294967296,1,1,'A',X'00')",
-        "INSERT INTO messages VALUES ('BOX',1,-1,1,'A',X'00')",
-        "INSERT INTO messages VALUES ('BOX',1,4294967296,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',0,1,1,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',4294967296,1,1,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',1,1,-1,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',1,1,4294967296,1,'A',X'00')",
         "INSERT INTO mailbox_sequences VALUES ('BOX',-1)",
         "INSERT INTO mailbox_sequences VALUES ('BOX',4294967296)",
         "INSERT INTO bulletins VALUES (0,1,1,'A','T',X'00')",
@@ -179,10 +180,10 @@ def test_message_identity_is_recipient_and_sequence(tmp_path):
     database = Database(tmp_path / "node.db")
     database.initialize()
     with database.connect() as connection:
-        connection.execute("INSERT INTO messages VALUES ('A',1,1,1,'SRC',X'00')")
-        connection.execute("INSERT INTO messages VALUES ('B',1,1,1,'SRC',X'00')")
+        connection.execute("INSERT INTO messages VALUES ('A',1,1,1,1,'SRC',X'00')")
+        connection.execute("INSERT INTO messages VALUES ('B',1,2,1,1,'SRC',X'00')")
         with pytest.raises(sqlite3.IntegrityError):
-            connection.execute("INSERT INTO messages VALUES ('A',1,1,1,'SRC',X'00')")
+            connection.execute("INSERT INTO messages VALUES ('A',1,3,1,1,'SRC',X'00')")
 
 
 def test_empty_v1_database_migrates_and_restarts(tmp_path):
@@ -191,9 +192,9 @@ def test_empty_v1_database_migrates_and_restarts(tmp_path):
     database = Database(path)
     database.initialize()
     Database(path).initialize()
-    assert database.get_schema_version() == 3
+    assert database.get_schema_version() == 4
     with database.connect() as connection:
-        assert schema_names(connection) - {"sqlite_sequence"} == V3_TABLES
+        assert schema_names(connection) - {"sqlite_sequence"} == V4_TABLES
 
 
 def test_interleaved_v1_messages_are_resequenced_per_mailbox_with_all_content(tmp_path):
