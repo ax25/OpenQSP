@@ -5,7 +5,6 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-
 from openqsp.api import create_api
 from openqsp.api.app import APIError, Signer
 from openqsp.protocol import SendMessage, Stored, decode_frame, encode_frame

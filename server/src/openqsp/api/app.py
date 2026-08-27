@@ -1,7 +1,5 @@
 """FastAPI adapter for the durable OpenQSP messaging domain."""
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import hashlib
@@ -21,10 +19,10 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict
 
 from openqsp.protocol import Message, normalize_callsign
@@ -155,7 +153,7 @@ class EventHub:
             for socket in tuple(self.connections.get(user, ())):
                 try:
                     await socket.send_json({"type": "message.created", "data": message})
-                except Exception:
+                except (OSError, RuntimeError, WebSocketDisconnect):
                     self.remove(user, socket)
 
     def listener(self, value: Message) -> None:
@@ -260,7 +258,9 @@ def create_api(
         )
 
     def user(
-        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None, Depends(bearer)
+        ],
     ) -> str:
         if credentials is None or credentials.scheme.lower() != "bearer":
             raise APIError(401, "invalid_token", "Authentication required.")
@@ -281,13 +281,13 @@ def create_api(
         }
 
     @app.get("/api/v1/me")
-    def me(callsign: str = Depends(user)) -> dict[str, str]:
+    def me(callsign: Annotated[str, Depends(user)]) -> dict[str, str]:
         return {"callsign": callsign}
 
     @app.post("/api/v1/messages", status_code=201)
     async def send(
         body: Send,
-        callsign: str = Depends(user),
+        callsign: Annotated[str, Depends(user)],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> dict[str, Any]:
         try:
@@ -333,7 +333,7 @@ def create_api(
 
     @app.get("/api/v1/messages")
     def list_messages(
-        callsign: str = Depends(user),
+        callsign: Annotated[str, Depends(user)],
         limit: int = Query(50, ge=1, le=200),
         cursor: str | None = None,
         with_: str | None = Query(None, alias="with"),
@@ -359,7 +359,9 @@ def create_api(
         return {"messages": [_message(v) for v in values], "next_cursor": next_cursor}
 
     @app.get("/api/v1/messages/{message_id}")
-    def get_message(message_id: str, callsign: str = Depends(user)) -> dict[str, Any]:
+    def get_message(
+        message_id: str, callsign: Annotated[str, Depends(user)]
+    ) -> dict[str, Any]:
         recipient, sequence = _parse_message_id(message_id)
         value = messages.get_message(recipient=recipient, sequence=sequence)
         if value is None or callsign not in (value.author, value.recipient):
@@ -368,7 +370,7 @@ def create_api(
 
     @app.get("/api/v1/sync")
     def sync(
-        callsign: str = Depends(user), cursor: str | None = None
+        callsign: Annotated[str, Depends(user)], cursor: str | None = None
     ) -> dict[str, Any]:
         after = 0 if cursor is None else signer.cursor_value(cursor, callsign, "sync")
         high = messages.api_high_water()

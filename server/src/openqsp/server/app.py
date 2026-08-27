@@ -8,6 +8,7 @@ import logging
 import signal
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from openqsp.storage import AccountStore, BulletinStore, Database, MessageStore
 from openqsp.transport.aprs import APRSAdapter
@@ -45,7 +46,7 @@ class OpenQSPServer:
         self.aprs_adapter: APRSAdapter | None = None
         self.aprs_client: APRSISClient | None = None
         self._aprs_task: asyncio.Task[None] | None = None
-        self._api_server: object | None = None
+        self._api_server: Any | None = None
         self._api_task: asyncio.Task[None] | None = None
         self._closed = asyncio.Event()
         self._close_started = False
@@ -129,7 +130,7 @@ class OpenQSPServer:
             await asyncio.gather(self._aprs_task, return_exceptions=True)
             self._aprs_task = None
         if self._api_server is not None:
-            setattr(self._api_server, "should_exit", True)
+            self._api_server.should_exit = True
         if self._api_task is not None:
             await self._api_task
             self._api_task = None
