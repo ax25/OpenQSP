@@ -313,7 +313,12 @@ def _stored_message(row: sqlite3.Row) -> StoredMessage:
         text = body.decode("utf-8")
     except UnicodeDecodeError as error:
         raise StorageIntegrityError("message body is not valid UTF-8") from error
-    api_sequence = int(row["api_sequence"]) if "api_sequence" in row else 0
+    try:
+        api_sequence = int(row["api_sequence"])
+    except IndexError:
+        # Legacy mailbox queries intentionally omit this API-only projection;
+        # sqlite3.Row membership tests values rather than column names.
+        api_sequence = 0
     return StoredMessage(
         sequence, created_at, accepted_at, author, recipient, text, api_sequence
     )
