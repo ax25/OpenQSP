@@ -83,6 +83,27 @@ def test_authenticated_identity_is_not_an_openapi_query_parameter(api):
         assert not any(parameter["name"] == "callsign" for parameter in parameters)
         assert schema["paths"][path][method]["security"]
 
+    send_parameters = schema["paths"]["/api/v1/messages"]["post"]["parameters"]
+    idempotency_key = next(
+        parameter
+        for parameter in send_parameters
+        if parameter["name"] == "Idempotency-Key" and parameter["in"] == "header"
+    )
+    assert idempotency_key["required"] is True
+
+
+def test_send_requires_idempotency_key_without_persisting(api):
+    _, headers = login(api)
+    response = api.post(
+        "/api/v1/messages",
+        headers=headers,
+        json={"to": "EA3ABC", "body": "must not persist"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert api.get("/api/v1/messages", headers=headers).json()["messages"] == []
+
 
 def test_send_visibility_authorization_filter_and_idempotency(api):
     _, gnu = login(api)
@@ -120,20 +141,22 @@ def test_validation_sender_spoof_and_pagination(api):
     _, headers = login(api)
     spoof = api.post(
         "/api/v1/messages",
-        headers=headers,
+        headers={**headers, "Idempotency-Key": "spoof"},
         json={"from": "EA3XYZ", "to": "EA3ABC", "body": "x"},
     )
     assert spoof.status_code == 422
     assert (
         api.post(
-            "/api/v1/messages", headers=headers, json={"to": "bad", "body": "x"}
+            "/api/v1/messages",
+            headers={**headers, "Idempotency-Key": "invalid-recipient"},
+            json={"to": "bad", "body": "x"},
         ).status_code
         == 422
     )
     assert (
         api.post(
             "/api/v1/messages",
-            headers=headers,
+            headers={**headers, "Idempotency-Key": "too-long"},
             json={"to": "EA3ABC", "body": "x" * 209},
         ).json()["error"]["code"]
         == "message_too_long"
@@ -141,7 +164,7 @@ def test_validation_sender_spoof_and_pagination(api):
     for number in range(3):
         api.post(
             "/api/v1/messages",
-            headers=headers,
+            headers={**headers, "Idempotency-Key": f"pagination-{number}"},
             json={"to": "EA3ABC", "body": str(number)},
         )
     page = api.get("/api/v1/messages?limit=2", headers=headers).json()
@@ -162,7 +185,11 @@ def test_sync_isolation_advancement_and_invalid_cursor(api):
     _, abc = login(api, "EA3ABC")
     initial = api.get("/api/v1/sync", headers=abc).json()
     assert initial["messages"] == []
-    api.post("/api/v1/messages", headers=gnu, json={"to": "EA3ABC", "body": "missed"})
+    api.post(
+        "/api/v1/messages",
+        headers={**gnu, "Idempotency-Key": "sync-missed"},
+        json={"to": "EA3ABC", "body": "missed"},
+    )
     changed = api.get("/api/v1/sync?cursor=" + initial["cursor"], headers=abc).json()
     assert [x["body"] for x in changed["messages"]] == ["missed"]
     assert (
@@ -223,7 +250,11 @@ def test_acceptance_websocket_disconnect_and_sync_recovery(api):
         event = socket.receive_json()
         assert sent.status_code == 201 and event["type"] == "message.created"
         assert event["data"] == sent.json()["message"]
-    api.post("/api/v1/messages", headers=gnu, json={"to": "EA3ABC", "body": "offline"})
+    api.post(
+        "/api/v1/messages",
+        headers={**gnu, "Idempotency-Key": "ws-offline"},
+        json={"to": "EA3ABC", "body": "offline"},
+    )
     recovered = api.get("/api/v1/sync?cursor=" + cursor, headers=abc).json()
     assert [x["body"] for x in recovered["messages"]] == ["Radio test", "offline"]
     assert (

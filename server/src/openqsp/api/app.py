@@ -288,7 +288,7 @@ def create_api(
     async def send(
         body: Send,
         callsign: Annotated[str, Depends(user)],
-        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
     ) -> dict[str, Any]:
         try:
             recipient = normalize_callsign(body.to)
@@ -296,7 +296,7 @@ def create_api(
             raise APIError(
                 422, "validation_error", "Invalid request.", {"to": str(error)}
             ) from None
-        if idempotency_key is not None and (not 1 <= len(idempotency_key) <= 128):
+        if not 1 <= len(idempotency_key) <= 128:
             raise APIError(
                 422,
                 "validation_error",
