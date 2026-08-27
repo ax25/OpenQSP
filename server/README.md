@@ -15,7 +15,8 @@ pip install -e .
 
 The runtime optionally reads simple `KEY=VALUE` entries from `.env` in the
 working directory. Existing environment variables take precedence. Copy
-`.env.example` and replace its APRS placeholders; `.env` is git-ignored.
+`.env.example` and replace any environment-specific values; `.env` is
+git-ignored.
 
 ## TCP only
 
@@ -28,22 +29,53 @@ openqsp-server
 Defaults are database `openqsp.db`, TCP `127.0.0.1:8023`, and APRS disabled.
 `--database`, `--host`, and `--port` override environment values.
 
+## APRS identity
+
+`OpenQSP` is the project and service name, but the APRS/AX.25 station identity
+is **`OQSP`**.
+
+Do not use `OPENQSP` as the APRS-IS login or packet source. AX.25 source
+callsigns are limited to six characters, while `OPENQSP` has seven. During
+real RF testing, APRS-IS accepted packets sourced from `OPENQSP`, but an
+Internet-to-RF IGate could not retransmit that source as a valid AX.25 station.
+Using `OQSP` allows the same identity to be used coherently for the APRS-IS
+login, incoming message addressee, ACK source, and outbound OpenQSP packets.
+
+The expected APRS flow is therefore:
+
+```text
+EA3GNU-5 -> OQSP      : message{1
+OQSP     -> EA3GNU-5 : ack1
+```
+
 ## APRS-IS only
 
-Put your operator-supplied credentials in `.env` (never commit this file):
+Use the OpenQSP APRS service identity in `.env`:
 
 ```env
 OPENQSP_TCP_ENABLED=false
 OPENQSP_APRS_ENABLED=true
-OPENQSP_APRS_CALLSIGN=OPENQSP
-OPENQSP_APRS_PASSCODE=...
+OPENQSP_APRS_CALLSIGN=OQSP
+OPENQSP_APRS_PASSCODE=28643
 OPENQSP_APRS_HOST=rotate.aprs2.net
 OPENQSP_APRS_PORT=14580
-OPENQSP_APRS_FILTER=g/OPENQSP
+OPENQSP_APRS_FILTER=g/OQSP
 ```
 
-Then run `openqsp-server`. If `OPENQSP_APRS_FILTER` is omitted, the runtime
-uses `g/<OPENQSP_APRS_CALLSIGN>`. It reconnects automatically after link loss.
+`28643` is the APRS-IS passcode corresponding to the `OQSP` service identity.
+If `OPENQSP_APRS_FILTER` is omitted, the runtime automatically uses
+`g/<OPENQSP_APRS_CALLSIGN>`, which is `g/OQSP` with this configuration.
+The APRS-IS connection reconnects automatically after link loss.
+
+A successful startup should include lines similar to:
+
+```text
+APRS-IS: connecting to rotate.aprs2.net:14580 as OQSP
+APRS-IS: connected and verified
+```
+
+APRS clients and radios should address OpenQSP messages to `OQSP`, not
+`OPENQSP`.
 
 ## TCP and APRS-IS
 
@@ -65,3 +97,7 @@ cd ~/Documents/OpenQSP/server
 source .venv/bin/activate
 openqsp-server
 ```
+
+Then send a normal APRS message by RF to `OQSP`. With an APRS message ID, a
+successful round trip should produce a server receive log followed by an ACK
+sent back to the originating station.
