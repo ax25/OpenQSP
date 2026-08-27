@@ -155,6 +155,12 @@ class APRSISClient:
                                 logger.exception("ignoring malformed APRS packet")
                 for outbound in self.adapter.poll():
                     writer.write((format_packet(outbound) + "\r\n").encode())
+                    logger.info(
+                        "APRS packet sent: from=%s to=%s body=%r",
+                        outbound.source,
+                        outbound.destination,
+                        outbound.body,
+                    )
                 await writer.drain()
         finally:
             self.adapter.connection_lost()

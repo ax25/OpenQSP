@@ -117,6 +117,33 @@ def test_unverified_login_is_rejected_and_link_state_is_cleaned() -> None:
     assert adapter.queued_count == adapter.pending_count == 0
 
 
+def test_connection_writes_and_logs_outbound_ack(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO")
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    client = APRSISClient(adapter, APRSISConfig(passcode="external"))
+    client.running = True
+    writer = FakeWriter()
+
+    asyncio.run(
+        client._connection(
+            FakeReader(
+                [
+                    "# logresp OPENQSP verified, server LOCAL",
+                    "EA3GNU-5>APRS,TCPIP*::OPENQSP  :Hola prueba radio{2",
+                ]
+            ),
+            writer,
+        )
+    )
+
+    assert writer.data == [b"OPENQSP>APOQSP,TCPIP*::EA3GNU-5 :ack2\r\n"]
+    assert (
+        "APRS packet sent: from=OPENQSP to=EA3GNU-5 body='ack2'" in caplog.text
+    )
+
+
 def test_run_reconnects_after_connector_failure_without_real_sleep() -> None:
     adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
     config = APRSISConfig(passcode="external", reconnect_delay=0)
