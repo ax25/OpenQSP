@@ -23,6 +23,7 @@ from .constants import (
     Operation,
 )
 from .errors import (
+    FieldTooLongError,
     InvalidFieldError,
     PayloadLengthError,
     ProtocolDecodeError,
@@ -126,7 +127,9 @@ def _text_bytes(value: object, field: str, minimum: int, maximum: int) -> bytes:
         raise InvalidFieldError(f"{field} must be valid UTF-8") from None
     if b"\x00" in encoded:
         raise InvalidFieldError(f"{field} must not contain NUL")
-    if not minimum <= len(encoded) <= maximum:
+    if len(encoded) > maximum:
+        raise FieldTooLongError(field, minimum, maximum)
+    if len(encoded) < minimum:
         raise InvalidFieldError(
             f"{field} must contain between {minimum} and {maximum} UTF-8 bytes"
         )

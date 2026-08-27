@@ -71,6 +71,20 @@ def test_authentication_and_me(api):
         signer.identity(signer.access("EA3GNU"))
 
 
+def test_authenticated_identity_is_not_an_openapi_query_parameter(api):
+    schema = api.get("/openapi.json").json()
+    protected = (
+        ("/api/v1/me", "get"),
+        ("/api/v1/messages", "get"),
+        ("/api/v1/messages", "post"),
+        ("/api/v1/sync", "get"),
+    )
+    for path, method in protected:
+        parameters = schema["paths"][path][method].get("parameters", [])
+        assert not any(parameter["name"] == "callsign" for parameter in parameters)
+        assert schema["paths"][path][method]["security"]
+
+
 def test_send_visibility_authorization_filter_and_idempotency(api):
     _, gnu = login(api)
     _, abc = login(api, "EA3ABC")
