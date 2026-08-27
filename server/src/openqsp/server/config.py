@@ -61,6 +61,12 @@ class ServerConfig:
     tcp_enabled: bool = True
     tcp_host: str = "127.0.0.1"
     tcp_port: int = 8023
+    api_enabled: bool = False
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+    api_token_secret: str | None = None
+    api_token_lifetime: int = 3600
+    api_cors_origins: tuple[str, ...] = ()
     aprs_enabled: bool = False
     aprs_callsign: str | None = None
     aprs_passcode: str | None = None
@@ -69,9 +75,7 @@ class ServerConfig:
     aprs_filter: str | None = None
 
     @classmethod
-    def from_environment(
-        cls, environ: Mapping[str, str] | None = None
-    ) -> ServerConfig:
+    def from_environment(cls, environ: Mapping[str, str] | None = None) -> ServerConfig:
         env = os.environ if environ is None else environ
         get = env.get
         config = cls(
@@ -81,6 +85,18 @@ class ServerConfig:
             ),
             tcp_host=get("OPENQSP_TCP_HOST", "127.0.0.1"),
             tcp_port=_port("OPENQSP_TCP_PORT", get("OPENQSP_TCP_PORT", "8023")),
+            api_enabled=_boolean(
+                "OPENQSP_API_ENABLED", get("OPENQSP_API_ENABLED", "false")
+            ),
+            api_host=get("OPENQSP_API_HOST", "127.0.0.1"),
+            api_port=_port("OPENQSP_API_PORT", get("OPENQSP_API_PORT", "8000")),
+            api_token_secret=get("OPENQSP_API_TOKEN_SECRET") or None,
+            api_token_lifetime=int(get("OPENQSP_API_TOKEN_LIFETIME", "3600")),
+            api_cors_origins=tuple(
+                x.strip()
+                for x in get("OPENQSP_API_CORS_ORIGINS", "").split(",")
+                if x.strip()
+            ),
             aprs_enabled=_boolean(
                 "OPENQSP_APRS_ENABLED", get("OPENQSP_APRS_ENABLED", "false")
             ),
@@ -109,8 +125,15 @@ class ServerConfig:
     def validate(self) -> None:
         _port("OPENQSP_TCP_PORT", str(self.tcp_port))
         _port("OPENQSP_APRS_PORT", str(self.aprs_port))
-        if not self.tcp_enabled and not self.aprs_enabled:
+        _port("OPENQSP_API_PORT", str(self.api_port))
+        if not self.tcp_enabled and not self.aprs_enabled and not self.api_enabled:
             raise ConfigurationError("at least one transport must be enabled")
+        if self.api_enabled and not self.api_token_secret:
+            raise ConfigurationError(
+                "OPENQSP_API_TOKEN_SECRET is required when API is enabled"
+            )
+        if self.api_token_lifetime <= 0:
+            raise ConfigurationError("OPENQSP_API_TOKEN_LIFETIME must be positive")
         if self.aprs_enabled and not self.aprs_callsign:
             raise ConfigurationError(
                 "OPENQSP_APRS_CALLSIGN is required when APRS is enabled"

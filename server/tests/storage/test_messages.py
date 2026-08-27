@@ -38,6 +38,23 @@ def test_store_message_persists_complete_row_and_returns_sequence(tmp_path):
     assert tuple(row) == ("EA3GNU", 1, "EA1ABC", 123, 456, "hello 🌍".encode())
 
 
+def test_api_list_preserves_persisted_api_sequence(tmp_path):
+    _, store = create_store(tmp_path / "node.db")
+    store.store_message(**message(body="first"))
+    store.store_message(**message(body="second"))
+
+    stored, has_more = store.api_list(callsign="EA3GNU", limit=1)
+
+    assert has_more is True
+    assert stored[0].api_sequence == 1
+    next_page, has_more = store.api_list(
+        callsign="EA3GNU", after=stored[0].api_sequence, limit=1
+    )
+    assert has_more is False
+    assert next_page[0].api_sequence == 2
+    assert next_page[0].body == "second"
+
+
 def test_first_and_second_message_receive_one_and_two(tmp_path):
     _, store = create_store(tmp_path / "node.db")
     assert store.store_message(**message(body="first")) == 1

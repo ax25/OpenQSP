@@ -13,6 +13,68 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+Use `pip install -e '.[test]'` when developing or running the complete suite.
+
+## Internet API v1
+
+The FastAPI Internet adapter shares the same SQLite database, account store and
+message domain operation as TCP/APRS. Every transport calls `ServerCore.send_message`,
+which validates, persists, allocates sequences, and publishes the single
+post-commit event consumed by WebSocket clients. Enable it with a private signing
+secret:
+
+```bash
+cd server
+OPENQSP_API_ENABLED=true \
+OPENQSP_API_TOKEN_SECRET='replace-with-a-long-random-production-secret' \
+OPENQSP_TCP_ENABLED=false \
+OPENQSP_APRS_ENABLED=false \
+openqsp-server
+```
+
+Optional settings are `OPENQSP_API_HOST` (default `127.0.0.1`),
+`OPENQSP_API_PORT` (default `8000`), `OPENQSP_API_TOKEN_LIFETIME` in seconds
+(default `3600`), and comma-separated `OPENQSP_API_CORS_ORIGINS`. CORS is off
+unless origins are explicitly configured; for local Flutter web development,
+for example, set `OPENQSP_API_CORS_ORIGINS=http://localhost:3000`.
+
+The safe development bind remains `127.0.0.1`. In the production reverse-proxy
+topology, Apache terminates HTTPS/WSS and proxies ordinary HTTP/WebSocket traffic
+to OpenQSP; OpenQSP itself does not need TLS configuration. If the proxy and API
+run on different machines, set `OPENQSP_API_HOST` to the API server's LAN address,
+or to `0.0.0.0` with an appropriate host firewall. The external URLs can remain
+`https://openqsp.ddns.net/api/v1/...` and
+`wss://openqsp.ddns.net/api/v1/ws` while the internal hop uses `http://`/`ws://`.
+
+Provision accounts with `openqsp-server --create-account` as described below.
+Interactive Swagger documentation is at <http://127.0.0.1:8000/docs> and the
+schema at <http://127.0.0.1:8000/openapi.json>.
+
+Login and send a message:
+
+```bash
+TOKEN=$(curl -s http://127.0.0.1:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"callsign":"EA3GNU","password":"choose-a-password"}' |
+  python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+curl -s http://127.0.0.1:8000/api/v1/messages \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: flutter-send-1' \
+  -d '{"to":"EA3ABC","body":"Radio test"}'
+```
+
+Clients first call `GET /api/v1/sync`, persist its opaque cursor, and supply it
+on later `GET /api/v1/sync?cursor=...` calls. Connect to
+`ws://127.0.0.1:8000/api/v1/ws?token=<access-token>` for low-latency
+`message.created` events. After every WebSocket disconnect, reconnect and run
+sync with the last stored cursor; HTTP sync, not the socket, is the source of
+truth. Access tokens expire and clients then log in again.
+
+Run Internet API tests with `python -m pytest -q tests/api`; run all tests with
+`python -m pytest -q tests`.
+
 The runtime optionally reads simple `KEY=VALUE` entries from `.env` in the
 working directory. Existing environment variables take precedence. Copy
 `.env.example` and replace any environment-specific values; `.env` is

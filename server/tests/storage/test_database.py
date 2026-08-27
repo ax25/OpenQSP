@@ -19,6 +19,7 @@ from openqsp.storage.migrations import (
 
 V2_TABLES = {"messages", "mailbox_sequences", "bulletins", "bulletin_sequence"}
 V3_TABLES = V2_TABLES | {"accounts"}
+V4_TABLES = V3_TABLES | {"api_message_sequence", "api_idempotency"}
 MIGRATION_1_DIGEST = "12be5fcae6e0a0267b3c7bbcfbfdc5cb7e109be07080cce067c1de39bd8b7777"
 
 
@@ -84,9 +85,9 @@ def test_migration_one_definition_is_unchanged():
 def test_fresh_database_runs_ordered_migrations_to_latest(tmp_path):
     database = Database(tmp_path / "node.db")
     database.initialize()
-    assert database.get_schema_version() == LATEST_SCHEMA_VERSION == 3
+    assert database.get_schema_version() == LATEST_SCHEMA_VERSION == 4
     with database.connect() as connection:
-        assert schema_names(connection) - {"sqlite_sequence"} == V3_TABLES
+        assert schema_names(connection) - {"sqlite_sequence"} == V4_TABLES
 
 
 def test_initialize_is_idempotent_and_preserves_rows(tmp_path):
@@ -110,7 +111,7 @@ def test_database_can_be_reopened_and_initialized(tmp_path):
     Database(path).initialize()
     reopened = Database(path)
     reopened.initialize()
-    assert reopened.get_schema_version() == 3
+    assert reopened.get_schema_version() == 4
 
 
 def test_unsupported_future_schema_is_rejected(tmp_path):
@@ -155,10 +156,10 @@ def test_message_and_bulletin_sequence_state_are_independent(tmp_path):
 @pytest.mark.parametrize(
     "sql",
     [
-        "INSERT INTO messages VALUES ('BOX',0,1,1,'A',X'00')",
-        "INSERT INTO messages VALUES ('BOX',4294967296,1,1,'A',X'00')",
-        "INSERT INTO messages VALUES ('BOX',1,-1,1,'A',X'00')",
-        "INSERT INTO messages VALUES ('BOX',1,4294967296,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',0,1,1,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',4294967296,1,1,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',1,1,-1,1,'A',X'00')",
+        "INSERT INTO messages VALUES ('BOX',1,1,4294967296,1,'A',X'00')",
         "INSERT INTO mailbox_sequences VALUES ('BOX',-1)",
         "INSERT INTO mailbox_sequences VALUES ('BOX',4294967296)",
         "INSERT INTO bulletins VALUES (0,1,1,'A','T',X'00')",
@@ -179,10 +180,10 @@ def test_message_identity_is_recipient_and_sequence(tmp_path):
     database = Database(tmp_path / "node.db")
     database.initialize()
     with database.connect() as connection:
-        connection.execute("INSERT INTO messages VALUES ('A',1,1,1,'SRC',X'00')")
-        connection.execute("INSERT INTO messages VALUES ('B',1,1,1,'SRC',X'00')")
+        connection.execute("INSERT INTO messages VALUES ('A',1,1,1,1,'SRC',X'00')")
+        connection.execute("INSERT INTO messages VALUES ('B',1,2,1,1,'SRC',X'00')")
         with pytest.raises(sqlite3.IntegrityError):
-            connection.execute("INSERT INTO messages VALUES ('A',1,1,1,'SRC',X'00')")
+            connection.execute("INSERT INTO messages VALUES ('A',1,3,1,1,'SRC',X'00')")
 
 
 def test_empty_v1_database_migrates_and_restarts(tmp_path):
@@ -191,9 +192,9 @@ def test_empty_v1_database_migrates_and_restarts(tmp_path):
     database = Database(path)
     database.initialize()
     Database(path).initialize()
-    assert database.get_schema_version() == 3
+    assert database.get_schema_version() == 4
     with database.connect() as connection:
-        assert schema_names(connection) - {"sqlite_sequence"} == V3_TABLES
+        assert schema_names(connection) - {"sqlite_sequence"} == V4_TABLES
 
 
 def test_interleaved_v1_messages_are_resequenced_per_mailbox_with_all_content(tmp_path):
@@ -217,6 +218,15 @@ def test_interleaved_v1_messages_are_resequenced_per_mailbox_with_all_content(tm
         state = dict(
             connection.execute("SELECT recipient,last_value FROM mailbox_sequences")
         )
+        api_order = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT api_sequence,recipient,mailbox_sequence FROM messages ORDER BY api_sequence"
+            )
+        ]
+        api_high_water = connection.execute(
+            "SELECT last_value FROM api_message_sequence WHERE singleton=1"
+        ).fetchone()[0]
     assert rows == [
         ("EA1ABC", 1, "B", 102, 502, b"message 2"),
         ("EA1ABC", 2, "D", 104, 504, b"message 4"),
@@ -224,6 +234,13 @@ def test_interleaved_v1_messages_are_resequenced_per_mailbox_with_all_content(tm
         ("EA3GNU", 2, "C", 103, 503, b"message 3"),
     ]
     assert state == {"EA1ABC": 2, "EA3GNU": 2}
+    assert api_order == [
+        (1, "EA3GNU", 1),
+        (2, "EA1ABC", 1),
+        (3, "EA3GNU", 2),
+        (4, "EA1ABC", 2),
+    ]
+    assert api_high_water == 4
 
 
 def test_one_mailbox_migrates_and_next_message_continues(tmp_path):
@@ -240,6 +257,39 @@ def test_one_mailbox_migrates_and_next_message_continues(tmp_path):
         )
         == 3
     )
+
+
+def test_v3_to_v4_backfills_deterministic_api_order_and_continues(tmp_path):
+    path = tmp_path / "v3.db"
+    connection = sqlite3.connect(path, isolation_level=None)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    migrate(connection, 0, target_version=3)
+    connection.execute("INSERT INTO mailbox_sequences VALUES ('EA3GNU', 1)")
+    connection.execute("INSERT INTO mailbox_sequences VALUES ('EA3ABC', 1)")
+    connection.execute("INSERT INTO messages VALUES ('EA3GNU',1,10,500,'SRC',X'61')")
+    connection.execute("INSERT INTO messages VALUES ('EA3ABC',1,10,500,'SRC',X'62')")
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+    with database.connect() as connection:
+        rows = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT api_sequence,recipient,body FROM messages ORDER BY api_sequence"
+            )
+        ]
+        high_water = connection.execute(
+            "SELECT last_value FROM api_message_sequence"
+        ).fetchone()[0]
+    assert rows == [(1, "EA3ABC", b"b"), (2, "EA3GNU", b"a")]
+    assert high_water == 2
+
+    MessageStore(database).store_message(
+        created_at=11, author="SRC", recipient="EA3GNU", body="next"
+    )
+    assert MessageStore(database).api_high_water() == 3
 
 
 def test_v1_bulletins_preserve_order_and_all_content_then_continue(tmp_path):

@@ -25,5 +25,17 @@ class InvalidFieldError(ProtocolError):
     """A protocol field has an invalid value or representation."""
 
 
+class FieldTooLongError(InvalidFieldError):
+    """A text field exceeds its domain-defined UTF-8 byte limit."""
+
+    def __init__(self, field: str, minimum: int, maximum: int) -> None:
+        self.field = field
+        self.minimum = minimum
+        self.maximum = maximum
+        super().__init__(
+            f"{field} must contain between {minimum} and {maximum} UTF-8 bytes"
+        )
+
+
 class PayloadLengthError(ProtocolDecodeError):
     """A frame payload does not have its declared or required length."""

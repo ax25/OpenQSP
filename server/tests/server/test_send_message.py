@@ -50,6 +50,36 @@ def test_valid_message_is_stored_with_authenticated_author(tmp_path):
     assert message.body == request.body
 
 
+def test_public_send_operation_is_shared_and_idempotency_publishes_once(tmp_path):
+    database = _database(tmp_path)
+    store = MessageStore(database, clock=lambda: 2000)
+    core = ServerCore(message_store=store)
+    events = []
+    core.add_message_listener(events.append)
+
+    first = core.send_message(
+        author="K1ABC",
+        recipient="EA3GNU",
+        body="shared ingress",
+        created_at=1234,
+        idempotency_key="http-retry",
+        request_hash="same-logical-request",
+    )
+    retry = core.send_message(
+        author="K1ABC",
+        recipient="EA3GNU",
+        body="shared ingress",
+        created_at=9999,
+        idempotency_key="http-retry",
+        request_hash="same-logical-request",
+    )
+
+    assert first.created is True
+    assert retry.created is False
+    assert retry.message == first.message
+    assert len(events) == 1
+    assert events[0].body == "shared ingress"
+    assert len(store.api_list(callsign="EA3GNU")[0]) == 1
 
 
 def test_invalid_object_field_uses_protocol_error():
@@ -97,9 +127,12 @@ def test_authenticated_callsign_is_validated_without_normalization(tmp_path):
         ErrorCode.UNAUTHORIZED,
         "invalid authenticated callsign",
     )
-    assert MessageStore(database).get_new_messages(
-        callsign="EA3GNU", since=0, limit=20
-    ).messages == ()
+    assert (
+        MessageStore(database)
+        .get_new_messages(callsign="EA3GNU", since=0, limit=20)
+        .messages
+        == ()
+    )
 
 
 def test_expected_storage_failures_become_protocol_errors():

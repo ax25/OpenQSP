@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping, Sequence
 
-LATEST_SCHEMA_VERSION = 3
+LATEST_SCHEMA_VERSION = 4
 
 # OpenQSP object IDs and synchronization sequences are unsigned 64-bit values,
 # while SQLite INTEGER is signed. Both are stored as exactly eight big-endian
@@ -202,10 +202,62 @@ _MIGRATION_3 = (
     """,
 )
 
+_MIGRATION_4 = (
+    "ALTER TABLE messages RENAME TO messages_v3",
+    """
+    CREATE TABLE api_message_sequence (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        last_value INTEGER NOT NULL CHECK(last_value >= 0)
+    )
+    """,
+    "INSERT INTO api_message_sequence(singleton, last_value) VALUES (1, 0)",
+    """
+    CREATE TABLE messages (
+        recipient TEXT NOT NULL,
+        mailbox_sequence INTEGER NOT NULL
+            CHECK(typeof(mailbox_sequence) = 'integer' AND mailbox_sequence BETWEEN 1 AND 4294967295),
+        api_sequence INTEGER NOT NULL UNIQUE CHECK(api_sequence > 0),
+        created_at INTEGER NOT NULL
+            CHECK(typeof(created_at) = 'integer' AND created_at BETWEEN 0 AND 4294967295),
+        accepted_at INTEGER NOT NULL CHECK(accepted_at >= 0),
+        author TEXT NOT NULL,
+        body BLOB NOT NULL,
+        PRIMARY KEY(recipient, mailbox_sequence)
+    ) WITHOUT ROWID
+    """,
+    """
+    INSERT INTO messages(recipient, mailbox_sequence, api_sequence, created_at,
+                         accepted_at, author, body)
+    SELECT recipient, mailbox_sequence,
+           ROW_NUMBER() OVER (ORDER BY accepted_at, recipient, mailbox_sequence),
+           created_at, accepted_at, author, body
+      FROM messages_v3
+    """,
+    "UPDATE api_message_sequence SET last_value = (SELECT COUNT(*) FROM messages)",
+    "CREATE INDEX idx_messages_api_sequence ON messages(api_sequence)",
+    "CREATE INDEX idx_messages_author_api_sequence ON messages(author, api_sequence)",
+    "CREATE INDEX idx_messages_recipient_api_sequence ON messages(recipient, api_sequence)",
+    """
+    CREATE TABLE api_idempotency (
+        author TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        mailbox_sequence INTEGER NOT NULL,
+        PRIMARY KEY(author, operation, idempotency_key),
+        FOREIGN KEY(recipient, mailbox_sequence)
+            REFERENCES messages(recipient, mailbox_sequence) ON DELETE CASCADE
+    ) WITHOUT ROWID
+    """,
+    "DROP TABLE messages_v3",
+)
+
 MIGRATIONS: Mapping[int, Sequence[str]] = {
     1: _MIGRATION_1,
     2: _MIGRATION_2,
     3: _MIGRATION_3,
+    4: _MIGRATION_4,
 }
 
 
