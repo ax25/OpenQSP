@@ -266,6 +266,10 @@ def create_api(
             raise APIError(401, "invalid_token", "Authentication required.")
         return signer.identity(credentials.credentials)
 
+    @app.get("/api/v1/status")
+    def status() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.post("/api/v1/auth/login")
     def login(body: Login) -> dict[str, Any]:
         try:
