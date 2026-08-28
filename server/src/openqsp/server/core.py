@@ -114,13 +114,15 @@ class ServerCore:
         if self._message_store is None:
             return
         delivered_at = int(time.time())
-        self._message_store.set_delivery(
+        changed = self._message_store.set_delivery(
             recipient=recipient,
             sequence=sequence,
             transport="aprs",
             status="delivered",
             delivered_at=delivered_at,
         )
+        if not changed:
+            return
         value = self._message_store.get_message(recipient=recipient, sequence=sequence)
         if value is not None:
             for listener in tuple(self._delivery_listeners):

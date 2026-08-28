@@ -294,29 +294,45 @@ class APRSAdapter:
         self.completed_transactions.append((peer, fragment.transaction_id))
         del self.completed_transactions[: -self.config.event_history_capacity]
         for response in responses:
-            self.queue_frame(peer, response)
+            decoded = decode_frame(response)
+            delivery = (
+                (decoded.recipient, decoded.sequence)
+                if isinstance(decoded, Message)
+                else None
+            )
+            self.queue_frame(peer, response, delivery=delivery)
+            if delivery is not None:
+                self.core.mark_aprs_pending(*delivery)
         return "completed"
+
+    def _fail_transaction(self, peer: str, pending: _Pending) -> None:
+        """Abandon every fragment of one failed delivery transaction."""
+        transaction_id = pending.transaction_id
+        self._queue = [
+            item
+            for item in self._queue
+            if item.peer != peer or item.fragment.transaction_id != transaction_id
+        ]
+        heapq.heapify(self._queue)
+        for key, other in tuple(self._pending.items()):
+            if key[0] == peer and other.transaction_id == transaction_id:
+                del self._pending[key]
+        if pending.delivery is not None:
+            self.core.mark_aprs_failed(*pending.delivery)
 
     def poll(self, *, now: float | None = None) -> list[OutboundPacket]:
         """Return packets currently permitted by ACK/retry and rate policies."""
         now = self.clock() if now is None else now
         packets, self._immediate = self._immediate, []
         for key, pending in tuple(self._pending.items()):
+            if self._pending.get(key) is not pending:
+                continue
             if now < pending.deadline:
                 continue
             if pending.attempts >= self.config.max_attempts:
                 self.failed_packets.append(pending.packet)
                 del self.failed_packets[: -self.config.event_history_capacity]
-                del self._pending[key]
-                if pending.delivery is not None:
-                    self.core.mark_aprs_failed(*pending.delivery)
-                    self._queue = [
-                        item
-                        for item in self._queue
-                        if item.fragment.transaction_id != pending.transaction_id
-                        or item.peer != key[0]
-                    ]
-                    heapq.heapify(self._queue)
+                self._fail_transaction(key[0], pending)
             elif (
                 now - self._last_send[pending.packet.destination]
                 >= self.config.min_interval
@@ -399,6 +415,15 @@ class APRSAdapter:
         scoped, TTL bounded, independent of one APRS-IS socket, and let a peer
         safely finish or replay a request after the service reconnects.
         """
+        abandoned = {
+            item.delivery for item in self._queue if item.delivery is not None
+        } | {
+            pending.delivery
+            for pending in self._pending.values()
+            if pending.delivery is not None
+        }
         self._queue.clear()
         self._pending.clear()
         self._immediate.clear()
+        for delivery in abandoned:
+            self.core.mark_aprs_failed(*delivery)

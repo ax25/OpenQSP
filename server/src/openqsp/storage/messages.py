@@ -361,16 +361,24 @@ class MessageStore:
         transport: str,
         status: str,
         delivered_at: int | None = None,
-    ) -> None:
+    ) -> bool:
+        """Apply a transport transition and report whether state changed.
+
+        Delivered is terminal. A failed delivery must first be explicitly
+        retried (moved to pending) before an acknowledgement can deliver it.
+        """
         with closing(self._database.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
+            cursor = connection.execute(
                 """INSERT INTO deliveries VALUES(?,?,?,?,?)
                    ON CONFLICT(recipient,mailbox_sequence,transport) DO UPDATE SET
-                   status=excluded.status, delivered_at=excluded.delivered_at""",
+                   status=excluded.status, delivered_at=excluded.delivered_at
+                   WHERE deliveries.status != 'delivered'
+                     AND NOT(deliveries.status='failed' AND excluded.status='delivered')""",
                 (recipient, sequence, transport, status, delivered_at),
             )
             connection.commit()
+        return cursor.rowcount > 0
 
 
 class IdempotencyConflictError(ValueError):
