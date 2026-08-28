@@ -39,6 +39,13 @@ def login(api, callsign="EA3GNU", password="password"):
     return response, {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def test_status_is_available_without_authentication(api):
+    response = api.get("/api/v1/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_authentication_and_me(api):
     response, headers = login(api, "ea3gnu")
     assert response.status_code == 200
