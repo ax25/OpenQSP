@@ -8,6 +8,27 @@ The application operations and binary frames are defined in `03-protocol.md`. Us
 
 A transport carries OpenQSP frames without changing their application meaning.
 
+### Message-state semantics
+
+OpenQSP keeps three independent concepts: **accepted** means the server
+validated and durably persisted a message; **delivered** means the destination
+endpoint confirmed receipt when its transport supports confirmation; and
+**read** means the recipient explicitly opened the conversation.
+
+Internet read state is private mailbox metadata, persisted as the highest
+mailbox sequence read for each `(owner, peer)` pair. Listing or syncing
+messages, opening the conversation list, and receiving `message.created` do not
+advance it. Clients explicitly call
+`POST /api/v1/conversations/{peer}/read`; `GET /api/v1/conversations` exposes
+per-peer unread counts. Sender-visible read receipts are out of scope.
+
+For Internet-to-APRS traffic, the destination terminal's existing ACK confirms
+**delivered** and may produce `message.delivered` for the Internet sender. For
+APRS-to-Internet traffic, the server's existing ACK confirms only **accepted**.
+Neither ACK means **read**. Read state is not synchronized over APRS, and no
+additional RF packet is sent for delivery or reading: the carriage's existing
+ACK traffic is reused.
+
 ---
 
 ## 1. Common responsibilities

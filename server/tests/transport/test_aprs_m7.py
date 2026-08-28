@@ -58,8 +58,7 @@ def test_transaction_allocator_skips_queue_and_pending_ids_at_rollover() -> None
     assert parse_fragment(packet.body).transaction_id == "000"
     pending_adapter._next_transaction["EA3AAA"] = 0
     assert (
-        pending_adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities()))
-        == "001"
+        pending_adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities())) == "001"
     )
 
 
@@ -190,6 +189,13 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
     message, flags = decode_frame_with_flags(pushed)
     assert isinstance(message, Message) and message.body == "durable proactive mail"
     assert flags == UNSOLICITED_FLAG
+    with messages._database.connect() as connection:
+        delivery = connection.execute(
+            "SELECT status, delivered_at FROM deliveries WHERE recipient=?",
+            ("EA3BBB",),
+        ).fetchone()
+    assert delivery["status"] == "delivered"
+    assert delivery["delivered_at"] is not None
 
     # Deliberately fail the next push; durable storage remains authoritative.
     second = encode_frame(SendMessage(2, "EA3BBB", "push may fail"))
@@ -226,8 +232,7 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
         if frame is not None:
             retrieved.append(decode_frame(frame))
     assert any(
-        isinstance(item, Message) and item.body == "push may fail"
-        for item in retrieved
+        isinstance(item, Message) and item.body == "push may fail" for item in retrieved
     )
 
 

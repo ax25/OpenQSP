@@ -16,6 +16,7 @@ from .bulletins import (
 )
 from .database import Database, UnsupportedSchemaVersionError
 from .messages import (
+    Conversation,
     IdempotencyConflictError,
     MessagePage,
     MessageStore,
@@ -36,6 +37,7 @@ __all__ = [
     "InvalidCursorError",
     "MessagePage",
     "MessageStore",
+    "Conversation",
     "SequenceExhaustedError",
     "StorageIntegrityError",
     "StoredBulletin",

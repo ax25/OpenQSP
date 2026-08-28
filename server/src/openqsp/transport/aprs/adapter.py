@@ -82,6 +82,7 @@ class _Queued:
     order: int
     peer: str = field(compare=False)
     fragment: APRSFragment = field(compare=False)
+    delivery: tuple[str, int] | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -90,6 +91,8 @@ class _Pending:
     attempts: int
     deadline: float
     priority: int
+    transaction_id: str
+    delivery: tuple[str, int] | None = None
 
 
 class APRSAdapter:
@@ -185,7 +188,14 @@ class APRSAdapter:
         )
         return active
 
-    def queue_frame(self, peer: str, frame: bytes, *, proactive: bool = False) -> str:
+    def queue_frame(
+        self,
+        peer: str,
+        frame: bytes,
+        *,
+        proactive: bool = False,
+        delivery: tuple[str, int] | None = None,
+    ) -> str:
         self.validate_peer(peer)
         transaction_id = self._allocate(peer, transaction=True)
         fragments = fragment_frame(frame, transaction_id)
@@ -201,7 +211,9 @@ class APRSAdapter:
                 fragment.data,
                 message_id,
             )
-            heapq.heappush(self._queue, _Queued(priority, self._order, peer, queued))
+            heapq.heappush(
+                self._queue, _Queued(priority, self._order, peer, queued, delivery)
+            )
             self._order += 1
         return transaction_id
 
@@ -214,11 +226,20 @@ class APRSAdapter:
             return "ignored"
         ack = _ACK_RE.fullmatch(body)
         if ack is not None:
-            return (
-                "acknowledged"
-                if self._pending.pop((peer, ack.group(1)), None)
-                else "ignored"
+            pending = self._pending.pop((peer, ack.group(1)), None)
+            if pending is None:
+                return "ignored"
+            transaction_outstanding = any(
+                item.peer == peer
+                and item.fragment.transaction_id == pending.transaction_id
+                for item in self._queue
+            ) or any(
+                other_peer == peer and other.transaction_id == pending.transaction_id
+                for (other_peer, _), other in self._pending.items()
             )
+            if pending.delivery is not None and not transaction_outstanding:
+                self.core.mark_aprs_delivered(*pending.delivery)
+            return "acknowledged"
         message_id = _MESSAGE_ID_RE.search(body)
         if message_id is not None:
             self._immediate.append(
@@ -287,6 +308,15 @@ class APRSAdapter:
                 self.failed_packets.append(pending.packet)
                 del self.failed_packets[: -self.config.event_history_capacity]
                 del self._pending[key]
+                if pending.delivery is not None:
+                    self.core.mark_aprs_failed(*pending.delivery)
+                    self._queue = [
+                        item
+                        for item in self._queue
+                        if item.fragment.transaction_id != pending.transaction_id
+                        or item.peer != key[0]
+                    ]
+                    heapq.heapify(self._queue)
             elif (
                 now - self._last_send[pending.packet.destination]
                 >= self.config.min_interval
@@ -307,7 +337,12 @@ class APRSAdapter:
                     self.service_callsign, item.peer, item.fragment.body
                 )
                 self._pending[(item.peer, item.fragment.message_id or "")] = _Pending(
-                    packet, 1, now + self.config.ack_timeout, item.priority
+                    packet,
+                    1,
+                    now + self.config.ack_timeout,
+                    item.priority,
+                    item.fragment.transaction_id,
+                    item.delivery,
                 )
                 self._last_send[item.peer] = now
                 packets.append(packet)
@@ -339,8 +374,12 @@ class APRSAdapter:
                 and now - active_at < self.config.activity_timeout
             ):
                 self.queue_frame(
-                    peer, encode_frame(message, unsolicited=True), proactive=True
+                    peer,
+                    encode_frame(message, unsolicited=True),
+                    proactive=True,
+                    delivery=(message.recipient, message.sequence),
                 )
+                self.core.mark_aprs_pending(message.recipient, message.sequence)
 
     @property
     def queued_count(self) -> int:

@@ -180,3 +180,17 @@ def test_clock_value_is_validated_and_failure_rolls_back(tmp_path, value):
             connection.execute("SELECT count(*) FROM mailbox_sequences").fetchone()[0]
             == 0
         )
+
+
+def test_conversation_read_state_survives_store_reopen(tmp_path):
+    path = tmp_path / "reads.db"
+    database, store = create_store(path)
+    store.store_message(**message(author="EA1ABC", recipient="EA3GNU", body="old"))
+    assert store.conversations(callsign="EA3GNU")[0].unread_count == 1
+    assert store.mark_conversation_read(owner="EA3GNU", peer="EA1ABC") == 1
+
+    reopened = MessageStore(Database(path))
+    conversation = reopened.conversations(callsign="EA3GNU")[0]
+    assert conversation.unread_count == 0
+    assert conversation.last_read_sequence == 1
+    assert reopened.mark_conversation_read(owner="EA3GNU", peer="EA9NONE") == 0

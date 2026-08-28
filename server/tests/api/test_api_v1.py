@@ -228,6 +228,71 @@ def test_concurrent_idempotency(api):
     assert len(api.get("/api/v1/messages", headers=headers).json()["messages"]) == 1
 
 
+def test_conversation_unread_is_explicit_private_and_incremental(api):
+    _, owner = login(api, "EA3ABC")
+    _, first = login(api, "EA3GNU")
+    _, second = login(api, "EA3XYZ")
+
+    for number in range(2):
+        api.post(
+            "/api/v1/messages",
+            headers={**first, "Idempotency-Key": f"first-{number}"},
+            json={"to": "EA3ABC", "body": f"incoming {number}"},
+        )
+    api.post(
+        "/api/v1/messages",
+        headers={**second, "Idempotency-Key": "second"},
+        json={"to": "EA3ABC", "body": "other peer"},
+    )
+    api.post(
+        "/api/v1/messages",
+        headers={**owner, "Idempotency-Key": "outgoing"},
+        json={"to": "EA3GNU", "body": "not unread"},
+    )
+
+    before = api.get("/api/v1/conversations", headers=owner).json()["conversations"]
+    assert {item["peer"]: item["unread_count"] for item in before} == {
+        "EA3GNU": 2,
+        "EA3XYZ": 1,
+    }
+    # Passive retrieval and sync never have read side effects.
+    assert api.get("/api/v1/messages", headers=owner).status_code == 200
+    assert api.get("/api/v1/sync", headers=owner).status_code == 200
+    unchanged = api.get("/api/v1/conversations", headers=owner).json()["conversations"]
+    assert {item["peer"]: item["unread_count"] for item in unchanged} == {
+        "EA3GNU": 2,
+        "EA3XYZ": 1,
+    }
+
+    read = api.post("/api/v1/conversations/ea3gnu/read", headers=owner)
+    assert read.status_code == 200
+    assert read.json()["unread_count"] == 0
+    assert (
+        api.post("/api/v1/conversations/EA3GNU/read", headers=owner).json()
+        == read.json()
+    )
+    counts = {
+        item["peer"]: item["unread_count"]
+        for item in api.get("/api/v1/conversations", headers=owner).json()[
+            "conversations"
+        ]
+    }
+    assert counts == {"EA3GNU": 0, "EA3XYZ": 1}
+
+    api.post(
+        "/api/v1/messages",
+        headers={**first, "Idempotency-Key": "later"},
+        json={"to": "EA3ABC", "body": "later"},
+    )
+    counts = {
+        item["peer"]: item["unread_count"]
+        for item in api.get("/api/v1/conversations", headers=owner).json()[
+            "conversations"
+        ]
+    }
+    assert counts["EA3GNU"] == 1
+
+
 def test_sync_orders_core_messages_with_equal_timestamps(api):
     _, abc = login(api, "EA3ABC")
     cursor = api.get("/api/v1/sync", headers=abc).json()["cursor"]
