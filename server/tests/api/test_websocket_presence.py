@@ -3,7 +3,10 @@
 import asyncio
 
 from openqsp.api import EventHub
-from openqsp.server import ActiveTransport
+from openqsp.protocol import GetCapabilities, encode_frame
+from openqsp.server import ActiveTransport, ServerCore
+from openqsp.transport.aprs import AdapterConfig, APRSAdapter
+from openqsp.transport.aprs.carriage import fragment_frame
 
 
 class RecordingSocket:
@@ -55,6 +58,28 @@ def test_aprs_transition_does_not_hide_old_websocket_from_replacement() -> None:
         presence = hub.router.presence.get("EA3GNU")
         assert presence.active_transport is ActiveTransport.WEBSOCKET
         assert presence.session_id == second_id
+
+    asyncio.run(scenario())
+
+
+def test_last_accepted_aprs_operation_supersedes_websocket() -> None:
+    async def scenario() -> None:
+        hub = EventHub()
+        socket = RecordingSocket()
+        await hub.connect("EA3GNU", socket)
+        adapter = APRSAdapter(
+            ServerCore(),
+            config=AdapterConfig(min_interval=0),
+            router=hub.router,
+        )
+        fragment = fragment_frame(encode_frame(GetCapabilities()), "ABC")[0]
+
+        assert adapter.receive("EA3GNU-7", fragment.body, now=0) == "completed"
+        presence = hub.router.presence.get("EA3GNU")
+        assert presence is not None
+        assert presence.active_transport is ActiveTransport.APRS
+        assert presence.aprs_endpoint == "EA3GNU-7"
+        assert presence.session_id is None
 
     asyncio.run(scenario())
 

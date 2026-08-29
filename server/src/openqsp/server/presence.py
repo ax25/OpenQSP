@@ -60,6 +60,12 @@ class PresenceRegistry:
             self._users[callsign] = value
         return value
 
+    def clear(self, callsign: str) -> bool:
+        """Remove the current proactive route, regardless of its transport."""
+        callsign = validate_callsign(callsign)
+        with self._lock:
+            return self._users.pop(callsign, None) is not None
+
     def clear_websocket(self, callsign: str, session_id: str) -> bool:
         """Clear only if ``session_id`` is still the authoritative session."""
         callsign = validate_callsign(callsign)
