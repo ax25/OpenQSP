@@ -1,3 +1,5 @@
 # Server Documentation
 
-This directory will contain documentation specific to the OpenQSP server.
+Documentation specific to the OpenQSP server.
+
+- [`transport-selection.md`](transport-selection.md) — per-user preferred transport switching between APRS and Internet.
