@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import (
@@ -137,6 +138,7 @@ class EventHub:
     def __init__(self) -> None:
         self.connections: dict[str, set[WebSocket]] = defaultdict(set)
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.internet_delivery: Callable[[str, int, int], bool] | None = None
 
     async def connect(self, callsign: str, socket: WebSocket) -> None:
         await socket.accept()
@@ -147,14 +149,25 @@ class EventHub:
         if not self.connections[callsign]:
             self.connections.pop(callsign, None)
 
-    async def emit(self, message: dict[str, Any]) -> None:
+    async def emit(self, message: dict[str, Any], sequence: int) -> None:
         users = {message["from"], message["to"]}
+        recipient_delivered = False
         for user in users:
             for socket in tuple(self.connections.get(user, ())):
                 try:
                     await socket.send_json({"type": "message.created", "data": message})
+                    if user == message["to"]:
+                        recipient_delivered = True
                 except (OSError, RuntimeError, WebSocketDisconnect):
                     self.remove(user, socket)
+        if recipient_delivered:
+            recorder = self.internet_delivery
+            if recorder is not None:
+                delivered_at = int(time.time())
+                if recorder(message["to"], sequence, delivered_at):
+                    await self.emit_delivery(
+                        message["from"], message["id"], delivered_at
+                    )
 
     async def emit_delivery(
         self, callsign: str, message_id: str, delivered_at: int
@@ -166,6 +179,19 @@ class EventHub:
             except (OSError, RuntimeError, WebSocketDisconnect):
                 self.remove(callsign, socket)
 
+    async def emit_read(
+        self, callsign: str, reader: str, last_read_message_id: str
+    ) -> None:
+        payload = {
+            "peer": reader,
+            "last_read_message_id": last_read_message_id,
+        }
+        for socket in tuple(self.connections.get(callsign, ())):
+            try:
+                await socket.send_json({"type": "message.read", "data": payload})
+            except (OSError, RuntimeError, WebSocketDisconnect):
+                self.remove(callsign, socket)
+
     def listener(self, value: Message) -> None:
         if self.loop is not None:
             payload = {
@@ -174,8 +200,12 @@ class EventHub:
                 "to": value.recipient,
                 "body": value.body,
                 "created_at": _timestamp(value.created_at),
+                "delivery_status": "stored",
+                "delivered_at": None,
             }
-            asyncio.run_coroutine_threadsafe(self.emit(payload), self.loop)
+            asyncio.run_coroutine_threadsafe(
+                self.emit(payload, value.sequence), self.loop
+            )
 
     def delivery_listener(self, value: StoredMessage, delivered_at: int) -> None:
         if self.loop is not None:
@@ -205,13 +235,19 @@ def _parse_message_id(value: str) -> tuple[str, int]:
         raise APIError(404, "not_found", "Message not found.") from None
 
 
-def _message(value: StoredMessage) -> dict[str, Any]:
+def _message(
+    value: StoredMessage,
+    delivery_status: str = "stored",
+    delivered_at: int | None = None,
+) -> dict[str, Any]:
     return {
         "id": _message_id(value.recipient, value.sequence),
         "from": value.author,
         "to": value.recipient,
         "body": value.body,
         "created_at": _timestamp(value.created_at),
+        "delivery_status": delivery_status,
+        "delivered_at": None if delivered_at is None else _timestamp(delivered_at),
     }
 
 
@@ -231,6 +267,18 @@ def create_api(
     app.state.events = events
     core.add_message_listener(events.listener)
     core.add_delivery_listener(events.delivery_listener)
+    events.internet_delivery = lambda recipient, sequence, delivered_at: messages.set_delivery(
+        recipient=recipient,
+        sequence=sequence,
+        transport="internet",
+        status="delivered",
+        delivered_at=delivered_at,
+    )
+
+    def project(value: StoredMessage) -> dict[str, Any]:
+        status, delivered_at = messages.message_state(value)
+        return _message(value, status, delivered_at)
+
     if cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -352,7 +400,7 @@ def create_api(
             raise APIError(
                 409, "conflict", "Idempotency key was used for a different request."
             ) from None
-        result = _message(acceptance.message)
+        result = project(acceptance.message)
         return {"message": result}
 
     @app.get("/api/v1/messages")
@@ -380,7 +428,7 @@ def create_api(
             if more and values
             else None
         )
-        return {"messages": [_message(v) for v in values], "next_cursor": next_cursor}
+        return {"messages": [project(v) for v in values], "next_cursor": next_cursor}
 
     @app.get("/api/v1/messages/{message_id}")
     def get_message(
@@ -390,7 +438,7 @@ def create_api(
         value = messages.get_message(recipient=recipient, sequence=sequence)
         if value is None or callsign not in (value.author, value.recipient):
             raise APIError(404, "not_found", "Message not found.")
-        return {"message": _message(value)}
+        return {"message": project(value)}
 
     @app.get("/api/v1/conversations")
     def conversations(callsign: Annotated[str, Depends(user)]) -> dict[str, Any]:
@@ -398,7 +446,7 @@ def create_api(
             "conversations": [
                 {
                     "peer": item.peer,
-                    "last_message": _message(item.last_message),
+                    "last_message": project(item.last_message),
                     "unread_count": item.unread_count,
                     "last_read_sequence": item.last_read_sequence,
                 }
@@ -407,12 +455,22 @@ def create_api(
         }
 
     @app.post("/api/v1/conversations/{peer}/read")
-    def mark_read(peer: str, callsign: Annotated[str, Depends(user)]) -> dict[str, Any]:
+    async def mark_read(
+        peer: str, callsign: Annotated[str, Depends(user)]
+    ) -> dict[str, Any]:
         try:
             normalized = normalize_callsign(peer)
         except InvalidFieldError:
             raise APIError(422, "validation_error", "Invalid peer callsign.") from None
-        sequence = messages.mark_conversation_read(owner=callsign, peer=normalized)
+        sequence, advanced = messages.advance_conversation_read(
+            owner=callsign, peer=normalized
+        )
+        if advanced:
+            await events.emit_read(
+                normalized,
+                callsign,
+                _message_id(callsign, sequence),
+            )
         return {"peer": normalized, "last_read_sequence": sequence, "unread_count": 0}
 
     @app.get("/api/v1/sync")
@@ -427,7 +485,7 @@ def create_api(
         # Advance only through returned changes; when none, safely capture the global high-water.
         position = values[-1].api_sequence if values else high
         return {
-            "messages": [_message(v) for v in values],
+            "messages": [project(v) for v in values],
             "cursor": signer.cursor(callsign, position, "sync"),
         }
 

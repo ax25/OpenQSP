@@ -295,6 +295,31 @@ class MessageStore:
                 ).fetchone()[0]
             )
 
+    def message_state(self, value: StoredMessage) -> tuple[str, int | None]:
+        """Project the recipient-visible delivery/read state for one message.
+
+        Read state is derived from the recipient's durable conversation cursor;
+        transport delivery remains independent and can therefore be exposed
+        without duplicating per-message read flags.
+        """
+        with closing(self._database.connect()) as connection:
+            read_row = connection.execute(
+                """SELECT last_read_sequence FROM conversation_reads
+                   WHERE owner_callsign=? AND peer_callsign=?""",
+                (value.recipient, value.author),
+            ).fetchone()
+            delivery_row = connection.execute(
+                """SELECT MAX(delivered_at) AS delivered_at FROM deliveries
+                   WHERE recipient=? AND mailbox_sequence=? AND status='delivered'""",
+                (value.recipient, value.sequence),
+            ).fetchone()
+        delivered_at = delivery_row["delivered_at"] if delivery_row is not None else None
+        if read_row is not None and int(read_row["last_read_sequence"]) >= value.sequence:
+            return "read", None if delivered_at is None else int(delivered_at)
+        if delivered_at is not None:
+            return "delivered", int(delivered_at)
+        return "stored", None
+
     def conversations(self, *, callsign: str) -> tuple[Conversation, ...]:
         """Return conversation summaries without changing private read state."""
         with closing(self._database.connect()) as connection:
@@ -327,10 +352,16 @@ class MessageStore:
             for row in rows
         )
 
-    def mark_conversation_read(self, *, owner: str, peer: str) -> int:
-        """Atomically cover every currently persisted incoming message from peer."""
+    def advance_conversation_read(self, *, owner: str, peer: str) -> tuple[int, bool]:
+        """Atomically advance a read cursor and report whether it moved."""
         with closing(self._database.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            previous_row = connection.execute(
+                """SELECT last_read_sequence FROM conversation_reads
+                   WHERE owner_callsign=? AND peer_callsign=?""",
+                (owner, peer),
+            ).fetchone()
+            previous = 0 if previous_row is None else int(previous_row[0])
             row = connection.execute(
                 """SELECT COALESCE(MAX(mailbox_sequence), 0) FROM messages
                     WHERE recipient=? AND author=?""",
@@ -351,7 +382,11 @@ class MessageStore:
                 ).fetchone()[0]
             )
             connection.commit()
-        return persisted
+        return persisted, persisted > previous
+
+    def mark_conversation_read(self, *, owner: str, peer: str) -> int:
+        """Atomically cover every currently persisted incoming message from peer."""
+        return self.advance_conversation_read(owner=owner, peer=peer)[0]
 
     def set_delivery(
         self,
