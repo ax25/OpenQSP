@@ -1,5 +1,8 @@
 """Message delivery/read status API and realtime contract tests."""
 
+import queue
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 from openqsp.api import create_api
@@ -45,6 +48,26 @@ def send(api, headers, key="status"):
     )
 
 
+def receive_json(socket, label, timeout=3.0):
+    """Receive a websocket event without allowing a broken test to hang CI."""
+    result = queue.Queue(maxsize=1)
+
+    def receive():
+        try:
+            result.put((True, socket.receive_json()))
+        except BaseException as error:  # pragma: no cover - diagnostic path
+            result.put((False, error))
+
+    threading.Thread(target=receive, daemon=True).start()
+    try:
+        ok, value = result.get(timeout=timeout)
+    except queue.Empty:
+        pytest.fail(f"Timed out waiting for websocket event: {label}")
+    if not ok:
+        raise value
+    return value
+
+
 def test_message_status_is_stored_then_delivered_then_read(api):
     _, gnu = login(api, "EA3GNU")
     _, abc = login(api, "EA3ABC")
@@ -83,9 +106,9 @@ def test_websocket_delivery_is_persisted_and_events_are_ordered(api):
     ):
         created = send(api, gnu, "internet-delivery").json()["message"]
 
-        sender_created = sender_socket.receive_json()
-        recipient_created = recipient_socket.receive_json()
-        delivered = sender_socket.receive_json()
+        sender_created = receive_json(sender_socket, "sender message.created")
+        recipient_created = receive_json(recipient_socket, "recipient message.created")
+        delivered = receive_json(sender_socket, "sender message.delivered")
 
         assert sender_created["type"] == "message.created"
         assert sender_created["data"]["id"] == created["id"]
@@ -108,7 +131,7 @@ def test_mark_read_emits_one_cursor_event_only_when_read_cursor_advances(api):
     with api.websocket_connect(f"/api/v1/ws?token={gnu_token}") as socket:
         first = api.post("/api/v1/conversations/EA3GNU/read", headers=abc)
         assert first.status_code == 200
-        event = socket.receive_json()
+        event = receive_json(socket, "sender message.read")
         assert event == {
             "type": "message.read",
             "data": {
