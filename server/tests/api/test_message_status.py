@@ -77,19 +77,21 @@ def test_websocket_delivery_is_persisted_and_events_are_ordered(api):
     gnu_token, gnu = login(api, "EA3GNU")
     abc_token, _ = login(api, "EA3ABC")
 
-    with api.websocket_connect(f"/api/v1/ws?token={gnu_token}") as sender_socket:
-        with api.websocket_connect(f"/api/v1/ws?token={abc_token}") as recipient_socket:
-            created = send(api, gnu, "internet-delivery").json()["message"]
+    with (
+        api.websocket_connect(f"/api/v1/ws?token={gnu_token}") as sender_socket,
+        api.websocket_connect(f"/api/v1/ws?token={abc_token}") as recipient_socket,
+    ):
+        created = send(api, gnu, "internet-delivery").json()["message"]
 
-            sender_created = sender_socket.receive_json()
-            recipient_created = recipient_socket.receive_json()
-            delivered = sender_socket.receive_json()
+        sender_created = sender_socket.receive_json()
+        recipient_created = recipient_socket.receive_json()
+        delivered = sender_socket.receive_json()
 
-            assert sender_created["type"] == "message.created"
-            assert sender_created["data"]["id"] == created["id"]
-            assert recipient_created == sender_created
-            assert delivered["type"] == "message.delivered"
-            assert delivered["data"]["id"] == created["id"]
+        assert sender_created["type"] == "message.created"
+        assert sender_created["data"]["id"] == created["id"]
+        assert recipient_created == sender_created
+        assert delivered["type"] == "message.delivered"
+        assert delivered["data"]["id"] == created["id"]
 
     reconstructed = api.get(
         f"/api/v1/messages/{created['id']}", headers=gnu
