@@ -84,6 +84,7 @@ class _Queued:
     peer: str = field(compare=False)
     fragment: APRSFragment = field(compare=False)
     delivery: tuple[str, int] | None = field(default=None, compare=False)
+    response_batch: tuple[str, str] | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -94,6 +95,7 @@ class _Pending:
     priority: int
     transaction_id: str
     delivery: tuple[str, int] | None = None
+    response_batch: tuple[str, str] | None = None
 
 
 class APRSAdapter:
@@ -199,6 +201,7 @@ class APRSAdapter:
         *,
         proactive: bool = False,
         delivery: tuple[str, int] | None = None,
+        response_batch: tuple[str, str] | None = None,
     ) -> str:
         self.validate_peer(peer)
         transaction_id = self._allocate(peer, transaction=True)
@@ -216,7 +219,15 @@ class APRSAdapter:
                 message_id,
             )
             heapq.heappush(
-                self._queue, _Queued(priority, self._order, peer, queued, delivery)
+                self._queue,
+                _Queued(
+                    priority,
+                    self._order,
+                    peer,
+                    queued,
+                    delivery,
+                    response_batch,
+                ),
             )
             self._order += 1
         return transaction_id
@@ -263,13 +274,14 @@ class APRSAdapter:
             return "invalid"
         if frame is None:
             return "fragment"
+        response_batch = (peer, fragment.transaction_id)
         cached = self.replay.get(peer, fragment.transaction_id, now)
         if cached is not None:
             if cached.request != frame:
                 return "conflict"
             self._activate_aprs_if_accepted(peer, cached.responses)
             for response in cached.responses:
-                self.queue_frame(peer, response)
+                self.queue_frame(peer, response, response_batch=response_batch)
             return "replayed"
         # Reassembly already validates via the production decoder; decoding here
         # classifies it as a valid client request before activity is refreshed.
@@ -306,7 +318,12 @@ class APRSAdapter:
                 if isinstance(decoded, Message)
                 else None
             )
-            self.queue_frame(peer, response, delivery=delivery)
+            self.queue_frame(
+                peer,
+                response,
+                delivery=delivery,
+                response_batch=response_batch,
+            )
             if delivery is not None:
                 self.core.mark_aprs_pending(*delivery)
         return "completed"
@@ -323,19 +340,44 @@ class APRSAdapter:
         self.router.presence.set_aprs(callsign, peer)
 
     def _fail_transaction(self, peer: str, pending: _Pending) -> None:
-        """Abandon every fragment of one failed delivery transaction."""
+        """Abort a failed frame and the rest of its request-response batch."""
         transaction_id = pending.transaction_id
-        self._queue = [
-            item
-            for item in self._queue
-            if item.peer != peer or item.fragment.transaction_id != transaction_id
-        ]
-        heapq.heapify(self._queue)
-        for key, other in tuple(self._pending.items()):
-            if key[0] == peer and other.transaction_id == transaction_id:
-                del self._pending[key]
+        response_batch = pending.response_batch
+        abandoned_deliveries: set[tuple[str, int]] = set()
         if pending.delivery is not None:
-            self.core.mark_aprs_failed(*pending.delivery)
+            abandoned_deliveries.add(pending.delivery)
+
+        def belongs_to_failed_work(item: _Queued) -> bool:
+            if item.peer != peer:
+                return False
+            if item.fragment.transaction_id == transaction_id:
+                return True
+            return response_batch is not None and item.response_batch == response_batch
+
+        retained: list[_Queued] = []
+        for item in self._queue:
+            if belongs_to_failed_work(item):
+                if item.delivery is not None:
+                    abandoned_deliveries.add(item.delivery)
+            else:
+                retained.append(item)
+        self._queue = retained
+        heapq.heapify(self._queue)
+
+        for key, other in tuple(self._pending.items()):
+            if key[0] != peer:
+                continue
+            same_transaction = other.transaction_id == transaction_id
+            same_batch = (
+                response_batch is not None and other.response_batch == response_batch
+            )
+            if same_transaction or same_batch:
+                if other.delivery is not None:
+                    abandoned_deliveries.add(other.delivery)
+                del self._pending[key]
+
+        for delivery in abandoned_deliveries:
+            self.core.mark_aprs_failed(*delivery)
 
     def poll(self, *, now: float | None = None) -> list[OutboundPacket]:
         """Return packets currently permitted by ACK/retry and rate policies."""
@@ -376,6 +418,7 @@ class APRSAdapter:
                     item.priority,
                     item.fragment.transaction_id,
                     item.delivery,
+                    item.response_batch,
                 )
                 self._last_send[item.peer] = now
                 packets.append(packet)
