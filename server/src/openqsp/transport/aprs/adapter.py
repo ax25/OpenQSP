@@ -40,8 +40,8 @@ _MESSAGE_ID_RE = re.compile(r"\{([0-9A-Z]{1,5})$")
 
 @dataclass(frozen=True)
 class AdapterConfig:
-    ack_timeout: float = 8.0
-    max_attempts: int = 3
+    ack_timeout: float = 10.0
+    max_attempts: int = 5
     min_interval: float = 2.0
     activity_timeout: float = 600.0
     reassembly_ttl: float = 120.0
@@ -175,9 +175,6 @@ class APRSAdapter:
             try:
                 active.add(parse_fragment(pending.packet.body).transaction_id)
             except CarriageError:
-                # Pending application packets are always fragments.  Keeping a
-                # malformed internal packet out of allocation state is safe and
-                # lets its normal retry/failure bookkeeping release it.
                 continue
         return active
 
@@ -283,8 +280,6 @@ class APRSAdapter:
             for response in cached.responses:
                 self.queue_frame(peer, response, response_batch=response_batch)
             return "replayed"
-        # Reassembly already validates via the production decoder; decoding here
-        # classifies it as a valid client request before activity is refreshed.
         request = decode_frame(frame)
         if not isinstance(
             request,
