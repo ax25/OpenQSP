@@ -274,7 +274,8 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
         == "completed"
     )
     assert drain_frame(adapter, recipient, now[0]) is not None
-    router.presence.set_aprs("EA3BBB", recipient)
+    presence = router.presence.get("EA3BBB")
+    assert presence is not None and presence.aprs_endpoint == recipient
 
     send = encode_frame(SendMessage(1, "EA3BBB", "durable proactive mail"))
     assert deliver(adapter, "EA3AAA-7", send, "101", now=now[0]) == "completed"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from openqsp.protocol import GetCapabilities, GetNewMessages, encode_frame
-from openqsp.server import ServerCore
+from openqsp.server import ActiveTransport, DeliveryRouter, ServerCore
 from openqsp.transport.aprs import AdapterConfig, APRSAdapter, OutboundPacket
 from openqsp.transport.aprs.aprsis import (
     APRSISConfig,
@@ -94,6 +94,57 @@ def test_adapter_acks_replays_and_rejects_conflict() -> None:
     assert core.calls == 1
     packets = adapter.poll(now=0)
     assert any(packet.body.startswith("ack") for packet in packets)
+
+
+def test_accepted_operation_selects_aprs_base_callsign_and_real_endpoint() -> None:
+    router = DeliveryRouter()
+    adapter = APRSAdapter(
+        CountingCore(), config=AdapterConfig(min_interval=0), router=router
+    )
+
+    assert (
+        deliver(adapter, "EA3AAA-10", encode_frame(GetCapabilities()), "ABC")
+        == "completed"
+    )
+
+    presence = router.presence.get("EA3AAA")
+    assert presence is not None
+    assert presence.active_transport is ActiveTransport.APRS
+    assert presence.callsign == "EA3AAA"
+    assert presence.aprs_endpoint == "EA3AAA-10"
+
+
+def test_invalid_and_non_openqsp_aprs_traffic_do_not_change_presence() -> None:
+    router = DeliveryRouter()
+    router.presence.set_websocket("EA3AAA", "web-session")
+    adapter = APRSAdapter(
+        CountingCore(), config=AdapterConfig(min_interval=0), router=router
+    )
+
+    assert adapter.receive("EA3AAA-10", "Q1:invalid{A1", now=0) == "ignored"
+    assert adapter.receive("EA3AAA-10", "position beacon", now=0) == "ignored"
+
+    presence = router.presence.get("EA3AAA")
+    assert presence is not None
+    assert presence.active_transport is ActiveTransport.WEBSOCKET
+    assert presence.session_id == "web-session"
+
+
+def test_rejected_operation_does_not_change_presence() -> None:
+    router = DeliveryRouter()
+    router.presence.set_websocket("EA3AAA", "web-session")
+    adapter = APRSAdapter(
+        CountingCore(), config=AdapterConfig(min_interval=0), router=router
+    )
+
+    assert (
+        deliver(adapter, "EA3AAA-10", encode_frame(GetNewMessages(0, 1)), "ABC")
+        == "completed"
+    )
+
+    presence = router.presence.get("EA3AAA")
+    assert presence is not None
+    assert presence.active_transport is ActiveTransport.WEBSOCKET
 
 
 def test_adapter_acks_human_message_with_message_id_before_parsing() -> None:

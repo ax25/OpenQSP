@@ -5,13 +5,15 @@ proactive delivery. Presence is operational routing state and is not stored on
 messages. The only MVP values are `websocket`, `aprs`, and no active transport;
 TCP is not part of this routing system.
 
-## Explicit presence
+## Traffic-derived presence
 
 - A successfully authenticated WebSocket connection selects `websocket` and
   records its unique session ID.
-- An application or service may explicitly select `aprs` and record the full
-  APRS endpoint (for example, `EA3GNU-7`). Observing APRS or APRS-IS traffic is
-  not sufficient to select APRS.
+- A valid OpenQSP operation accepted through APRS selects `aprs`. The base
+  callsign is the user identity and the full source (for example,
+  `EA3GNU-7`) is retained as its delivery endpoint. Beacons, position,
+  telemetry, non-OpenQSP traffic, invalid frames, and rejected operations do
+  not affect presence.
 - Selecting either transport replaces the previous selection. There is no
   automatic fallback between transports.
 - A new WebSocket session supersedes the old session for the same callsign.

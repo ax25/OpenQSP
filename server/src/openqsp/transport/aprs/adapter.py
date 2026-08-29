@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from openqsp.protocol import (
+    Error,
     GetBulletin,
     GetCapabilities,
     GetNewBulletins,
@@ -266,6 +267,7 @@ class APRSAdapter:
         if cached is not None:
             if cached.request != frame:
                 return "conflict"
+            self._activate_aprs_if_accepted(peer, cached.responses)
             for response in cached.responses:
                 self.queue_frame(peer, response)
             return "replayed"
@@ -285,6 +287,7 @@ class APRSAdapter:
             return "invalid"
         callsign = normalize_callsign(peer, "APRS source")
         responses = tuple(self.core.handle_frame(callsign, frame))
+        self._activate_aprs_if_accepted(peer, responses)
         self.replay.put(peer, fragment.transaction_id, frame, responses, now)
         self._expire_activity(now)
         if (
@@ -307,6 +310,17 @@ class APRSAdapter:
             if delivery is not None:
                 self.core.mark_aprs_pending(*delivery)
         return "completed"
+
+    def _activate_aprs_if_accepted(
+        self, peer: str, responses: tuple[bytes, ...]
+    ) -> None:
+        """Select APRS only after Core accepts a valid client operation."""
+        if self.router is None or not responses:
+            return
+        if any(isinstance(decode_frame(response), Error) for response in responses):
+            return
+        callsign = normalize_callsign(peer, "APRS source")
+        self.router.presence.set_aprs(callsign, peer)
 
     def _fail_transaction(self, peer: str, pending: _Pending) -> None:
         """Abandon every fragment of one failed delivery transaction."""
