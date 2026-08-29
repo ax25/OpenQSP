@@ -8,6 +8,7 @@ of connections or sessions.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -83,6 +84,7 @@ class ServerCore:
         self._message_store = message_store
         self._bulletin_store = bulletin_store
         self._message_listeners: list[Callable[[Message], object]] = []
+        self._delivery_listeners: list[Callable[[StoredMessage, int], object]] = []
 
     def add_message_listener(self, listener: Callable[[Message], object]) -> None:
         self._message_listeners.append(listener)
@@ -92,6 +94,48 @@ class ServerCore:
             self._message_listeners.remove(listener)
         except ValueError:
             pass
+
+    def add_delivery_listener(
+        self, listener: Callable[[StoredMessage, int], object]
+    ) -> None:
+        self._delivery_listeners.append(listener)
+
+    def mark_aprs_pending(self, recipient: str, sequence: int) -> None:
+        if self._message_store is not None:
+            self._message_store.set_delivery(
+                recipient=recipient,
+                sequence=sequence,
+                transport="aprs",
+                status="pending",
+            )
+
+    def mark_aprs_delivered(self, recipient: str, sequence: int) -> None:
+        """Record endpoint delivery after the destination's existing APRS ACK."""
+        if self._message_store is None:
+            return
+        delivered_at = int(time.time())
+        changed = self._message_store.set_delivery(
+            recipient=recipient,
+            sequence=sequence,
+            transport="aprs",
+            status="delivered",
+            delivered_at=delivered_at,
+        )
+        if not changed:
+            return
+        value = self._message_store.get_message(recipient=recipient, sequence=sequence)
+        if value is not None:
+            for listener in tuple(self._delivery_listeners):
+                listener(value, delivered_at)
+
+    def mark_aprs_failed(self, recipient: str, sequence: int) -> None:
+        if self._message_store is not None:
+            self._message_store.set_delivery(
+                recipient=recipient,
+                sequence=sequence,
+                transport="aprs",
+                status="failed",
+            )
 
     def send_message(
         self,

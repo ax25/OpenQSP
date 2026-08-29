@@ -156,6 +156,16 @@ class EventHub:
                 except (OSError, RuntimeError, WebSocketDisconnect):
                     self.remove(user, socket)
 
+    async def emit_delivery(
+        self, callsign: str, message_id: str, delivered_at: int
+    ) -> None:
+        payload = {"id": message_id, "delivered_at": _timestamp(delivered_at)}
+        for socket in tuple(self.connections.get(callsign, ())):
+            try:
+                await socket.send_json({"type": "message.delivered", "data": payload})
+            except (OSError, RuntimeError, WebSocketDisconnect):
+                self.remove(callsign, socket)
+
     def listener(self, value: Message) -> None:
         if self.loop is not None:
             payload = {
@@ -166,6 +176,17 @@ class EventHub:
                 "created_at": _timestamp(value.created_at),
             }
             asyncio.run_coroutine_threadsafe(self.emit(payload), self.loop)
+
+    def delivery_listener(self, value: StoredMessage, delivered_at: int) -> None:
+        if self.loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                self.emit_delivery(
+                    value.author,
+                    _message_id(value.recipient, value.sequence),
+                    delivered_at,
+                ),
+                self.loop,
+            )
 
 
 def _timestamp(value: int) -> str:
@@ -209,6 +230,7 @@ def create_api(
     bearer = HTTPBearer(auto_error=False)
     app.state.events = events
     core.add_message_listener(events.listener)
+    core.add_delivery_listener(events.delivery_listener)
     if cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -258,9 +280,7 @@ def create_api(
         )
 
     def user(
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None, Depends(bearer)
-        ],
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     ) -> str:
         if credentials is None or credentials.scheme.lower() != "bearer":
             raise APIError(401, "invalid_token", "Authentication required.")
@@ -371,6 +391,29 @@ def create_api(
         if value is None or callsign not in (value.author, value.recipient):
             raise APIError(404, "not_found", "Message not found.")
         return {"message": _message(value)}
+
+    @app.get("/api/v1/conversations")
+    def conversations(callsign: Annotated[str, Depends(user)]) -> dict[str, Any]:
+        return {
+            "conversations": [
+                {
+                    "peer": item.peer,
+                    "last_message": _message(item.last_message),
+                    "unread_count": item.unread_count,
+                    "last_read_sequence": item.last_read_sequence,
+                }
+                for item in messages.conversations(callsign=callsign)
+            ]
+        }
+
+    @app.post("/api/v1/conversations/{peer}/read")
+    def mark_read(peer: str, callsign: Annotated[str, Depends(user)]) -> dict[str, Any]:
+        try:
+            normalized = normalize_callsign(peer)
+        except InvalidFieldError:
+            raise APIError(422, "validation_error", "Invalid peer callsign.") from None
+        sequence = messages.mark_conversation_read(owner=callsign, peer=normalized)
+        return {"peer": normalized, "last_read_sequence": sequence, "unread_count": 0}
 
     @app.get("/api/v1/sync")
     def sync(

@@ -58,8 +58,7 @@ def test_transaction_allocator_skips_queue_and_pending_ids_at_rollover() -> None
     assert parse_fragment(packet.body).transaction_id == "000"
     pending_adapter._next_transaction["EA3AAA"] = 0
     assert (
-        pending_adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities()))
-        == "001"
+        pending_adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities())) == "001"
     )
 
 
@@ -153,6 +152,98 @@ def drain_frame(adapter: APRSAdapter, peer: str, now: float) -> bytes | None:
     return None
 
 
+def delivery_status(messages: MessageStore, recipient: str, sequence: int) -> str:
+    with messages._database.connect() as connection:
+        row = connection.execute(
+            """SELECT status FROM deliveries
+               WHERE recipient=? AND mailbox_sequence=? AND transport='aprs'""",
+            (recipient, sequence),
+        ).fetchone()
+    assert row is not None
+    return row["status"]
+
+
+def test_get_new_messages_aprs_ack_marks_each_message_delivered(tmp_path: Path) -> None:
+    core, messages = database_core(tmp_path / "retrieval-delivery.sqlite")
+    delivered = []
+    core.add_delivery_listener(lambda message, at: delivered.append((message, at)))
+    sequence = messages.store_message(
+        created_at=1, author="EA3AAA", recipient="EA3BBB", body="mailbox retrieval"
+    )
+    adapter = APRSAdapter(core, config=AdapterConfig(min_interval=0))
+
+    assert (
+        deliver(
+            adapter,
+            "EA3BBB-10",
+            encode_frame(GetNewMessages(0, 20)),
+            "300",
+            now=0,
+        )
+        == "completed"
+    )
+    response = drain_frame(adapter, "EA3BBB-10", 0)
+    assert response is not None
+    assert isinstance(decode_frame(response), Message)
+    assert delivery_status(messages, "EA3BBB", sequence) == "delivered"
+    assert len(delivered) == 1 and delivered[0][0].sequence == sequence
+
+
+def test_multifragment_delivery_failure_cancels_transaction_and_ignores_late_ack(
+    tmp_path: Path,
+) -> None:
+    core, messages = database_core(tmp_path / "fragment-failure.sqlite")
+    sequence = messages.store_message(
+        created_at=1, author="EA3AAA", recipient="EA3BBB", body="x" * 208
+    )
+    frame = encode_frame(Message(sequence, 1, "EA3AAA", "EA3BBB", "x" * 208))
+    assert len(fragment_frame(frame, "000")) > 1
+    adapter = APRSAdapter(
+        core,
+        config=AdapterConfig(min_interval=0, ack_timeout=1, max_attempts=1),
+    )
+    adapter.queue_frame("EA3BBB-10", frame, delivery=("EA3BBB", sequence))
+    core.mark_aprs_pending("EA3BBB", sequence)
+    failures = []
+    original_failed = core.mark_aprs_failed
+
+    def record_failed(recipient: str, failed_sequence: int) -> None:
+        failures.append((recipient, failed_sequence))
+        original_failed(recipient, failed_sequence)
+
+    core.mark_aprs_failed = record_failed
+
+    packet = adapter.poll(now=0)[0]
+    late_ack = f"ack{parse_fragment(packet.body).message_id}"
+    adapter.poll(now=1)
+
+    assert adapter.queued_count == adapter.pending_count == 0
+    assert failures == [("EA3BBB", sequence)]
+    assert delivery_status(messages, "EA3BBB", sequence) == "failed"
+    assert adapter.receive("EA3BBB-10", late_ack, now=2) == "ignored"
+    assert delivery_status(messages, "EA3BBB", sequence) == "failed"
+
+
+def test_connection_loss_marks_abandoned_delivery_failed(tmp_path: Path) -> None:
+    core, messages = database_core(tmp_path / "connection-delivery.sqlite")
+    sequence = messages.store_message(
+        created_at=1, author="EA3AAA", recipient="EA3BBB", body="disconnect"
+    )
+    frame = encode_frame(Message(sequence, 1, "EA3AAA", "EA3BBB", "disconnect"))
+    adapter = APRSAdapter(core, config=AdapterConfig(min_interval=0))
+    adapter.queue_frame("EA3BBB-10", frame, delivery=("EA3BBB", sequence))
+    core.mark_aprs_pending("EA3BBB", sequence)
+    packet = adapter.poll(now=0)[0]
+    late_ack = f"ack{parse_fragment(packet.body).message_id}"
+
+    adapter.connection_lost()
+
+    assert adapter.queued_count == adapter.pending_count == 0
+    assert delivery_status(messages, "EA3BBB", sequence) == "failed"
+    assert adapter.receive("EA3BBB-10", late_ack, now=1) == "ignored"
+    assert delivery_status(messages, "EA3BBB", sequence) == "failed"
+
+
 def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
     tmp_path: Path,
 ) -> None:
@@ -190,6 +281,13 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
     message, flags = decode_frame_with_flags(pushed)
     assert isinstance(message, Message) and message.body == "durable proactive mail"
     assert flags == UNSOLICITED_FLAG
+    with messages._database.connect() as connection:
+        delivery = connection.execute(
+            "SELECT status, delivered_at FROM deliveries WHERE recipient=?",
+            ("EA3BBB",),
+        ).fetchone()
+    assert delivery["status"] == "delivered"
+    assert delivery["delivered_at"] is not None
 
     # Deliberately fail the next push; durable storage remains authoritative.
     second = encode_frame(SendMessage(2, "EA3BBB", "push may fail"))
@@ -226,8 +324,7 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
         if frame is not None:
             retrieved.append(decode_frame(frame))
     assert any(
-        isinstance(item, Message) and item.body == "push may fail"
-        for item in retrieved
+        isinstance(item, Message) and item.body == "push may fail" for item in retrieved
     )
 
 

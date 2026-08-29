@@ -39,6 +39,14 @@ class MessagePage:
     has_more: bool
 
 
+@dataclass(frozen=True)
+class Conversation:
+    peer: str
+    last_message: StoredMessage
+    unread_count: int
+    last_read_sequence: int
+
+
 class MessageStore:
     def __init__(
         self, database: Database, *, clock: Callable[[], int] | None = None
@@ -286,6 +294,91 @@ class MessageStore:
                     "SELECT last_value FROM api_message_sequence WHERE singleton=1"
                 ).fetchone()[0]
             )
+
+    def conversations(self, *, callsign: str) -> tuple[Conversation, ...]:
+        """Return conversation summaries without changing private read state."""
+        with closing(self._database.connect()) as connection:
+            rows = connection.execute(
+                """WITH visible AS (
+                       SELECT *, CASE WHEN author=? THEN recipient ELSE author END AS peer
+                         FROM messages WHERE author=? OR recipient=?
+                   ), latest AS (
+                       SELECT peer, MAX(api_sequence) AS latest_api FROM visible GROUP BY peer
+                   )
+                   SELECT v.*, COALESCE(r.last_read_sequence, 0) AS last_read_sequence,
+                          (SELECT COUNT(*) FROM messages incoming
+                            WHERE incoming.recipient=? AND incoming.author=v.peer
+                              AND incoming.mailbox_sequence >
+                                  COALESCE(r.last_read_sequence, 0)) AS unread_count
+                     FROM latest l JOIN visible v
+                       ON v.peer=l.peer AND v.api_sequence=l.latest_api
+                     LEFT JOIN conversation_reads r
+                       ON r.owner_callsign=? AND r.peer_callsign=v.peer
+                    ORDER BY v.api_sequence DESC""",
+                (callsign, callsign, callsign, callsign, callsign),
+            ).fetchall()
+        return tuple(
+            Conversation(
+                row["peer"],
+                _stored_message(row),
+                int(row["unread_count"]),
+                int(row["last_read_sequence"]),
+            )
+            for row in rows
+        )
+
+    def mark_conversation_read(self, *, owner: str, peer: str) -> int:
+        """Atomically cover every currently persisted incoming message from peer."""
+        with closing(self._database.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT COALESCE(MAX(mailbox_sequence), 0) FROM messages
+                    WHERE recipient=? AND author=?""",
+                (owner, peer),
+            ).fetchone()
+            sequence = int(row[0])
+            connection.execute(
+                """INSERT INTO conversation_reads VALUES(?,?,?)
+                   ON CONFLICT(owner_callsign,peer_callsign) DO UPDATE SET
+                   last_read_sequence=MAX(last_read_sequence,excluded.last_read_sequence)""",
+                (owner, peer, sequence),
+            )
+            persisted = int(
+                connection.execute(
+                    """SELECT last_read_sequence FROM conversation_reads
+                    WHERE owner_callsign=? AND peer_callsign=?""",
+                    (owner, peer),
+                ).fetchone()[0]
+            )
+            connection.commit()
+        return persisted
+
+    def set_delivery(
+        self,
+        *,
+        recipient: str,
+        sequence: int,
+        transport: str,
+        status: str,
+        delivered_at: int | None = None,
+    ) -> bool:
+        """Apply a transport transition and report whether state changed.
+
+        Delivered is terminal. A failed delivery must first be explicitly
+        retried (moved to pending) before an acknowledgement can deliver it.
+        """
+        with closing(self._database.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """INSERT INTO deliveries VALUES(?,?,?,?,?)
+                   ON CONFLICT(recipient,mailbox_sequence,transport) DO UPDATE SET
+                   status=excluded.status, delivered_at=excluded.delivered_at
+                   WHERE deliveries.status != 'delivered'
+                     AND NOT(deliveries.status='failed' AND excluded.status='delivered')""",
+                (recipient, sequence, transport, status, delivered_at),
+            )
+            connection.commit()
+        return cursor.rowcount > 0
 
 
 class IdempotencyConflictError(ValueError):

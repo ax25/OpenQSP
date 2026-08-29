@@ -16,6 +16,7 @@ from .bulletins import (
 )
 from .database import Database, UnsupportedSchemaVersionError
 from .messages import (
+    Conversation,
     IdempotencyConflictError,
     MessagePage,
     MessageStore,
@@ -30,6 +31,7 @@ __all__ = [
     "AccountStore",
     "BulletinPage",
     "BulletinStore",
+    "Conversation",
     "Database",
     "IdempotencyConflictError",
     "InvalidCredentialsError",

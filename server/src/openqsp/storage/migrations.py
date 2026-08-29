@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping, Sequence
 
-LATEST_SCHEMA_VERSION = 4
+LATEST_SCHEMA_VERSION = 5
 
 # OpenQSP object IDs and synchronization sequences are unsigned 64-bit values,
 # while SQLite INTEGER is signed. Both are stored as exactly eight big-endian
@@ -253,11 +253,35 @@ _MIGRATION_4 = (
     "DROP TABLE messages_v3",
 )
 
+_MIGRATION_5 = (
+    """
+    CREATE TABLE conversation_reads (
+        owner_callsign TEXT NOT NULL,
+        peer_callsign TEXT NOT NULL,
+        last_read_sequence INTEGER NOT NULL CHECK(last_read_sequence >= 0),
+        PRIMARY KEY(owner_callsign, peer_callsign)
+    ) WITHOUT ROWID
+    """,
+    """
+    CREATE TABLE deliveries (
+        recipient TEXT NOT NULL,
+        mailbox_sequence INTEGER NOT NULL,
+        transport TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending', 'delivered', 'failed')),
+        delivered_at INTEGER CHECK(delivered_at IS NULL OR delivered_at >= 0),
+        PRIMARY KEY(recipient, mailbox_sequence, transport),
+        FOREIGN KEY(recipient, mailbox_sequence)
+            REFERENCES messages(recipient, mailbox_sequence) ON DELETE CASCADE
+    ) WITHOUT ROWID
+    """,
+)
+
 MIGRATIONS: Mapping[int, Sequence[str]] = {
     1: _MIGRATION_1,
     2: _MIGRATION_2,
     3: _MIGRATION_3,
     4: _MIGRATION_4,
+    5: _MIGRATION_5,
 }
 
 

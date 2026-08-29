@@ -20,6 +20,7 @@ from openqsp.storage.migrations import (
 V2_TABLES = {"messages", "mailbox_sequences", "bulletins", "bulletin_sequence"}
 V3_TABLES = V2_TABLES | {"accounts"}
 V4_TABLES = V3_TABLES | {"api_message_sequence", "api_idempotency"}
+V5_TABLES = V4_TABLES | {"conversation_reads", "deliveries"}
 MIGRATION_1_DIGEST = "12be5fcae6e0a0267b3c7bbcfbfdc5cb7e109be07080cce067c1de39bd8b7777"
 
 
@@ -85,9 +86,9 @@ def test_migration_one_definition_is_unchanged():
 def test_fresh_database_runs_ordered_migrations_to_latest(tmp_path):
     database = Database(tmp_path / "node.db")
     database.initialize()
-    assert database.get_schema_version() == LATEST_SCHEMA_VERSION == 4
+    assert database.get_schema_version() == LATEST_SCHEMA_VERSION == 5
     with database.connect() as connection:
-        assert schema_names(connection) - {"sqlite_sequence"} == V4_TABLES
+        assert schema_names(connection) - {"sqlite_sequence"} == V5_TABLES
 
 
 def test_initialize_is_idempotent_and_preserves_rows(tmp_path):
@@ -111,7 +112,7 @@ def test_database_can_be_reopened_and_initialized(tmp_path):
     Database(path).initialize()
     reopened = Database(path)
     reopened.initialize()
-    assert reopened.get_schema_version() == 4
+    assert reopened.get_schema_version() == 5
 
 
 def test_unsupported_future_schema_is_rejected(tmp_path):
@@ -192,9 +193,9 @@ def test_empty_v1_database_migrates_and_restarts(tmp_path):
     database = Database(path)
     database.initialize()
     Database(path).initialize()
-    assert database.get_schema_version() == 4
+    assert database.get_schema_version() == 5
     with database.connect() as connection:
-        assert schema_names(connection) - {"sqlite_sequence"} == V4_TABLES
+        assert schema_names(connection) - {"sqlite_sequence"} == V5_TABLES
 
 
 def test_interleaved_v1_messages_are_resequenced_per_mailbox_with_all_content(tmp_path):
