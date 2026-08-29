@@ -20,7 +20,7 @@ from openqsp.protocol import (
     encode_frame,
     normalize_callsign,
 )
-from openqsp.server import ServerCore
+from openqsp.server import DeliveryRouter, ServerCore
 
 from .carriage import (
     APRSFragment,
@@ -105,6 +105,7 @@ class APRSAdapter:
         config: AdapterConfig | None = None,
         clock: Callable[[], float] | None = None,
         service_callsign: str = SERVICE_CALLSIGN,
+        router: DeliveryRouter | None = None,
     ) -> None:
         self.core, self.config = core, config or AdapterConfig()
         self.service_callsign = self.validate_peer(service_callsign.upper())
@@ -127,7 +128,9 @@ class APRSAdapter:
         self._order = 0
         self.completed_transactions: list[tuple[str, str]] = []
         self.failed_packets: list[OutboundPacket] = []
-        core.add_message_listener(self._on_message)
+        self.router = router
+        if router is not None:
+            router.aprs_delivery = self.deliver_message
 
     @staticmethod
     def validate_peer(peer: str) -> str:
@@ -382,20 +385,16 @@ class APRSAdapter:
             if now - active_at >= self.config.activity_timeout:
                 del self._activity[peer]
 
-    def _on_message(self, message: Message) -> None:
-        now = self.clock()
-        for peer, (callsign, active_at) in tuple(self._activity.items()):
-            if (
-                callsign == message.recipient
-                and now - active_at < self.config.activity_timeout
-            ):
-                self.queue_frame(
-                    peer,
-                    encode_frame(message, unsolicited=True),
-                    proactive=True,
-                    delivery=(message.recipient, message.sequence),
-                )
-                self.core.mark_aprs_pending(message.recipient, message.sequence)
+    def deliver_message(self, message: Message, endpoint: str) -> bool:
+        """Queue a routed message for an explicitly selected APRS endpoint."""
+        self.queue_frame(
+            endpoint,
+            encode_frame(message, unsolicited=True),
+            proactive=True,
+            delivery=(message.recipient, message.sequence),
+        )
+        self.core.mark_aprs_pending(message.recipient, message.sequence)
+        return True
 
     @property
     def queued_count(self) -> int:
@@ -406,7 +405,8 @@ class APRSAdapter:
         return len(self._pending)
 
     def close(self) -> None:
-        self.core.remove_message_listener(self._on_message)
+        if self.router is not None and self.router.aprs_delivery == self.deliver_message:
+            self.router.aprs_delivery = None
 
     def connection_lost(self) -> None:
         """Discard link delivery state that cannot be ACK-correlated after reconnect.

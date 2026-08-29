@@ -101,6 +101,8 @@ def test_websocket_delivery_is_persisted_and_events_are_ordered(api):
     events = api.app.state.events
     events.connections["EA3GNU"].add(sender_socket)
     events.connections["EA3ABC"].add(recipient_socket)
+    events.sessions["recipient-session"] = recipient_socket
+    events.router.presence.set_websocket("EA3ABC", "recipient-session")
 
     try:
         created = send(api, gnu, "internet-delivery").json()["message"]
@@ -108,7 +110,7 @@ def test_websocket_delivery_is_persisted_and_events_are_ordered(api):
         wait_for_events(recipient_socket, 1)
     finally:
         events.remove("EA3GNU", sender_socket)
-        events.remove("EA3ABC", recipient_socket)
+        events.remove("EA3ABC", recipient_socket, "recipient-session")
 
     sender_created, delivered = sender_socket.events
     recipient_created = recipient_socket.events[0]
