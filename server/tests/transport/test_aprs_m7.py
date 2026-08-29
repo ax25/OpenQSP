@@ -14,8 +14,7 @@ from openqsp.protocol import (
     encode_frame,
 )
 from openqsp.protocol.constants import UNSOLICITED_FLAG
-from openqsp.server import ServerCore
-from openqsp.server import DeliveryRouter
+from openqsp.server import DeliveryRouter, ServerCore
 from openqsp.storage import BulletinStore, Database, MessageStore
 from openqsp.transport.aprs import AdapterConfig, APRSAdapter
 from openqsp.transport.aprs.carriage import APRSFragment, fragment_frame, parse_fragment
