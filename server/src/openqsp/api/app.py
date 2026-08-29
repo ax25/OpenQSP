@@ -156,17 +156,18 @@ class EventHub:
             for socket in tuple(self.connections.get(user, ())):
                 try:
                     await socket.send_json({"type": "message.created", "data": message})
-                    if user == message["to"] and not recipient_delivered:
+                    if user == message["to"]:
                         recipient_delivered = True
-                        recorder = self.internet_delivery
-                        if recorder is not None:
-                            delivered_at = int(time.time())
-                            if recorder(message["to"], sequence, delivered_at):
-                                await self.emit_delivery(
-                                    message["from"], message["id"], delivered_at
-                                )
                 except (OSError, RuntimeError, WebSocketDisconnect):
                     self.remove(user, socket)
+        if recipient_delivered:
+            recorder = self.internet_delivery
+            if recorder is not None:
+                delivered_at = int(time.time())
+                if recorder(message["to"], sequence, delivered_at):
+                    await self.emit_delivery(
+                        message["from"], message["id"], delivered_at
+                    )
 
     async def emit_delivery(
         self, callsign: str, message_id: str, delivered_at: int
