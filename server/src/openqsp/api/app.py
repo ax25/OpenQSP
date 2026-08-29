@@ -172,6 +172,22 @@ class EventHub:
             self.sessions[session_id] = socket
             return session_id
 
+    def record_internet_activity(self, callsign: str) -> None:
+        """Apply the last-valid-communication rule after an HTTP operation."""
+        connected = self.connections.get(callsign, ())
+        session_id = next(
+            (
+                candidate
+                for candidate, socket in self.sessions.items()
+                if socket in connected
+            ),
+            None,
+        )
+        if session_id is None:
+            self.router.presence.clear(callsign)
+            return
+        self.router.presence.set_websocket(callsign, session_id)
+
     def remove(
         self,
         callsign: str,
@@ -411,12 +427,25 @@ def create_api(
             },
         )
 
+    @app.middleware("http")
+    async def record_authenticated_activity(
+        request: Request, call_next: Callable[[Request], Any]
+    ) -> Any:
+        response = await call_next(request)
+        callsign = getattr(request.state, "authenticated_callsign", None)
+        if callsign is not None and 200 <= response.status_code < 400:
+            events.record_internet_activity(callsign)
+        return response
+
     def user(
+        request: Request,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     ) -> str:
         if credentials is None or credentials.scheme.lower() != "bearer":
             raise APIError(401, "invalid_token", "Authentication required.")
-        return signer.identity(credentials.credentials)
+        callsign = signer.identity(credentials.credentials)
+        request.state.authenticated_callsign = callsign
+        return callsign
 
     @app.get("/api/v1/status")
     def status() -> dict[str, str]:

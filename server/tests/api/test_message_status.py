@@ -5,8 +5,11 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from openqsp.api import create_api
-from openqsp.server import ServerCore
+from openqsp.protocol import GetCapabilities, encode_frame
+from openqsp.server import ActiveTransport, ServerCore
 from openqsp.storage import AccountStore, Database, MessageStore
+from openqsp.transport.aprs import AdapterConfig, APRSAdapter
+from openqsp.transport.aprs.carriage import fragment_frame
 
 
 class RecordingSocket:
@@ -63,6 +66,89 @@ def wait_for_events(socket, count, timeout=1.0):
     while len(socket.events) < count and time.monotonic() < deadline:
         time.sleep(0.01)
     assert len(socket.events) >= count
+
+
+def accepted_aprs_operation(api, callsign, endpoint):
+    events = api.app.state.events
+    adapter = APRSAdapter(
+        api.app.state.core,
+        config=AdapterConfig(min_interval=0),
+        router=events.router,
+    )
+    fragment = fragment_frame(encode_frame(GetCapabilities()), "ABC")[0]
+    assert adapter.receive(endpoint, fragment.body, now=0) == "completed"
+    presence = events.router.presence.get(callsign)
+    assert presence is not None
+    assert presence.active_transport is ActiveTransport.APRS
+    return adapter
+
+
+def test_http_activity_reactivates_existing_websocket_and_routes_to_it(api):
+    _, recipient_headers = login(api, "EA3GNU")
+    _, sender_headers = login(api, "EA3ABC")
+    socket = RecordingSocket()
+    events = api.app.state.events
+    events.connections["EA3GNU"].add(socket)
+    events.sessions["existing-session"] = socket
+    events.router.presence.set_websocket("EA3GNU", "existing-session")
+    adapter = accepted_aprs_operation(api, "EA3GNU", "EA3GNU-7")
+    aprs_deliveries = []
+    adapter.deliver_message = lambda message, endpoint: aprs_deliveries.append(
+        endpoint
+    ) or True
+    events.router.aprs_delivery = adapter.deliver_message
+
+    try:
+        assert api.get("/api/v1/me", headers=recipient_headers).status_code == 200
+        presence = events.router.presence.get("EA3GNU")
+        assert presence is not None
+        assert presence.active_transport is ActiveTransport.WEBSOCKET
+        assert presence.session_id == "existing-session"
+
+        response = api.post(
+            "/api/v1/messages",
+            headers={**sender_headers, "Idempotency-Key": "back-on-internet"},
+            json={"to": "EA3GNU", "body": "delivered on existing WS"},
+        )
+        assert response.status_code == 201
+        wait_for_events(socket, 1)
+        assert any(event["type"] == "message.created" for event in socket.events)
+        assert aprs_deliveries == []
+    finally:
+        events.remove("EA3GNU", socket, "existing-session")
+        adapter.close()
+
+
+def test_http_activity_without_websocket_clears_aprs_and_leaves_message_stored(api):
+    _, recipient_headers = login(api, "EA3GNU")
+    _, sender_headers = login(api, "EA3ABC")
+    events = api.app.state.events
+    adapter = accepted_aprs_operation(api, "EA3GNU", "EA3GNU-7")
+    aprs_deliveries = []
+    adapter.deliver_message = lambda message, endpoint: aprs_deliveries.append(
+        endpoint
+    ) or True
+    events.router.aprs_delivery = adapter.deliver_message
+
+    rejected = api.get("/api/v1/messages/not-a-message", headers=recipient_headers)
+    assert rejected.status_code == 404
+    assert (
+        events.router.presence.get("EA3GNU").active_transport
+        is ActiveTransport.APRS
+    )
+
+    assert api.get("/api/v1/me", headers=recipient_headers).status_code == 200
+    assert events.router.presence.get("EA3GNU") is None
+
+    response = api.post(
+        "/api/v1/messages",
+        headers={**sender_headers, "Idempotency-Key": "recipient-offline"},
+        json={"to": "EA3GNU", "body": "stored without proactive route"},
+    )
+    assert response.status_code == 201
+    assert response.json()["message"]["delivery_status"] == "stored"
+    assert aprs_deliveries == []
+    adapter.close()
 
 
 def test_message_status_is_stored_then_delivered_then_read(api):

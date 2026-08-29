@@ -9,6 +9,9 @@ TCP is not part of this routing system.
 
 - A successfully authenticated WebSocket connection selects `websocket` and
   records its unique session ID.
+- A valid authenticated HTTP operation reselects an already connected
+  WebSocket session. If that user has no connected WebSocket, it clears the
+  proactive route instead; HTTP is not itself a proactive transport.
 - A valid OpenQSP operation accepted through APRS selects `aprs`. The base
   callsign is the user identity and the full source (for example,
   `EA3GNU-7`) is retained as its delivery endpoint. Beacons, position,
