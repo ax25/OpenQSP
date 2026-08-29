@@ -184,7 +184,7 @@ def test_clock_value_is_validated_and_failure_rolls_back(tmp_path, value):
 
 def test_conversation_read_state_survives_store_reopen(tmp_path):
     path = tmp_path / "reads.db"
-    database, store = create_store(path)
+    _database, store = create_store(path)
     store.store_message(**message(author="EA1ABC", recipient="EA3GNU", body="old"))
     assert store.conversations(callsign="EA3GNU")[0].unread_count == 1
     assert store.mark_conversation_read(owner="EA3GNU", peer="EA1ABC") == 1
