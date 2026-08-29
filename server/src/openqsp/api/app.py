@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import (
@@ -137,6 +138,7 @@ class EventHub:
     def __init__(self) -> None:
         self.connections: dict[str, set[WebSocket]] = defaultdict(set)
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.internet_delivery: Callable[[str, int, int], bool] | None = None
 
     async def connect(self, callsign: str, socket: WebSocket) -> None:
         await socket.accept()
@@ -147,12 +149,22 @@ class EventHub:
         if not self.connections[callsign]:
             self.connections.pop(callsign, None)
 
-    async def emit(self, message: dict[str, Any]) -> None:
+    async def emit(self, message: dict[str, Any], sequence: int) -> None:
         users = {message["from"], message["to"]}
+        recipient_delivered = False
         for user in users:
             for socket in tuple(self.connections.get(user, ())):
                 try:
                     await socket.send_json({"type": "message.created", "data": message})
+                    if user == message["to"] and not recipient_delivered:
+                        recipient_delivered = True
+                        recorder = self.internet_delivery
+                        if recorder is not None:
+                            delivered_at = int(time.time())
+                            if recorder(message["to"], sequence, delivered_at):
+                                await self.emit_delivery(
+                                    message["from"], message["id"], delivered_at
+                                )
                 except (OSError, RuntimeError, WebSocketDisconnect):
                     self.remove(user, socket)
 
@@ -190,7 +202,9 @@ class EventHub:
                 "delivery_status": "stored",
                 "delivered_at": None,
             }
-            asyncio.run_coroutine_threadsafe(self.emit(payload), self.loop)
+            asyncio.run_coroutine_threadsafe(
+                self.emit(payload, value.sequence), self.loop
+            )
 
     def delivery_listener(self, value: StoredMessage, delivered_at: int) -> None:
         if self.loop is not None:
@@ -252,6 +266,13 @@ def create_api(
     app.state.events = events
     core.add_message_listener(events.listener)
     core.add_delivery_listener(events.delivery_listener)
+    events.internet_delivery = lambda recipient, sequence, delivered_at: messages.set_delivery(
+        recipient=recipient,
+        sequence=sequence,
+        transport="internet",
+        status="delivered",
+        delivered_at=delivered_at,
+    )
 
     def project(value: StoredMessage) -> dict[str, Any]:
         status, delivered_at = messages.message_state(value)
