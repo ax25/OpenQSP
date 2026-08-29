@@ -144,23 +144,33 @@ class EventHub:
         self.internet_delivery: Callable[[str, int, int], bool] | None = None
         self.router = router or DeliveryRouter()
         self.router.websocket_delivery = self.websocket_delivery
+        self._connection_lock = asyncio.Lock()
 
     async def connect(self, callsign: str, socket: WebSocket) -> str:
         await socket.accept()
-        session_id = uuid.uuid4().hex
-        previous = self.router.presence.get(callsign)
-        self.router.presence.set_websocket(callsign, session_id)
-        self.connections[callsign].add(socket)
-        self.sessions[session_id] = socket
-        if previous is not None and previous.session_id is not None:
-            old = self.sessions.pop(previous.session_id, None)
-            if old is not None and old is not socket:
-                self.connections[callsign].discard(old)
+        async with self._connection_lock:
+            # WebSocket ownership is tracked independently from transport
+            # presence. Presence may currently be APRS while an older socket is
+            # still unwinding, and that socket must still be superseded.
+            previous_sockets = tuple(self.connections.pop(callsign, ()))
+            for old in previous_sockets:
+                old_sessions = tuple(
+                    session_id
+                    for session_id, connected in self.sessions.items()
+                    if connected is old
+                )
+                for old_session_id in old_sessions:
+                    self.sessions.pop(old_session_id, None)
                 try:
                     await old.close(code=4001, reason="superseded by a newer session")
                 except (OSError, RuntimeError, WebSocketDisconnect):
                     pass
-        return session_id
+
+            session_id = uuid.uuid4().hex
+            self.router.presence.set_websocket(callsign, session_id)
+            self.connections[callsign].add(socket)
+            self.sessions[session_id] = socket
+            return session_id
 
     def remove(
         self,
@@ -193,6 +203,17 @@ class EventHub:
         )
         return True
 
+    def _authoritative_socket(
+        self, callsign: str
+    ) -> tuple[str, WebSocket] | None:
+        presence = self.router.presence.get(callsign)
+        if presence is None or presence.session_id is None:
+            return None
+        socket = self.sessions.get(presence.session_id)
+        if socket is None or socket not in self.connections.get(callsign, ()):
+            return None
+        return presence.session_id, socket
+
     @staticmethod
     def _payload(value: Message) -> dict[str, Any]:
         return {
@@ -206,11 +227,14 @@ class EventHub:
         }
 
     async def emit_author(self, message: dict[str, Any]) -> None:
-        for socket in tuple(self.connections.get(message["from"], ())):
-            try:
-                await socket.send_json({"type": "message.created", "data": message})
-            except (OSError, RuntimeError, WebSocketDisconnect):
-                self.remove(message["from"], socket)
+        active = self._authoritative_socket(message["from"])
+        if active is None:
+            return
+        session_id, socket = active
+        try:
+            await socket.send_json({"type": "message.created", "data": message})
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            self.remove(message["from"], socket, session_id)
 
     async def emit_recipient(
         self, message: dict[str, Any], sequence: int, session_id: str
@@ -234,11 +258,14 @@ class EventHub:
         self, callsign: str, message_id: str, delivered_at: int
     ) -> None:
         payload = {"id": message_id, "delivered_at": _timestamp(delivered_at)}
-        for socket in tuple(self.connections.get(callsign, ())):
-            try:
-                await socket.send_json({"type": "message.delivered", "data": payload})
-            except (OSError, RuntimeError, WebSocketDisconnect):
-                self.remove(callsign, socket)
+        active = self._authoritative_socket(callsign)
+        if active is None:
+            return
+        session_id, socket = active
+        try:
+            await socket.send_json({"type": "message.delivered", "data": payload})
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            self.remove(callsign, socket, session_id)
 
     async def emit_read(
         self, callsign: str, reader: str, last_read_message_id: str
@@ -247,11 +274,14 @@ class EventHub:
             "peer": reader,
             "last_read_message_id": last_read_message_id,
         }
-        for socket in tuple(self.connections.get(callsign, ())):
-            try:
-                await socket.send_json({"type": "message.read", "data": payload})
-            except (OSError, RuntimeError, WebSocketDisconnect):
-                self.remove(callsign, socket)
+        active = self._authoritative_socket(callsign)
+        if active is None:
+            return
+        session_id, socket = active
+        try:
+            await socket.send_json({"type": "message.read", "data": payload})
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            self.remove(callsign, socket, session_id)
 
     def listener(self, value: Message) -> None:
         if self.loop is not None:

@@ -101,7 +101,9 @@ def test_websocket_delivery_is_persisted_and_events_are_ordered(api):
     events = api.app.state.events
     events.connections["EA3GNU"].add(sender_socket)
     events.connections["EA3ABC"].add(recipient_socket)
+    events.sessions["sender-session"] = sender_socket
     events.sessions["recipient-session"] = recipient_socket
+    events.router.presence.set_websocket("EA3GNU", "sender-session")
     events.router.presence.set_websocket("EA3ABC", "recipient-session")
 
     try:
@@ -109,7 +111,7 @@ def test_websocket_delivery_is_persisted_and_events_are_ordered(api):
         wait_for_events(sender_socket, 2)
         wait_for_events(recipient_socket, 1)
     finally:
-        events.remove("EA3GNU", sender_socket)
+        events.remove("EA3GNU", sender_socket, "sender-session")
         events.remove("EA3ABC", recipient_socket, "recipient-session")
 
     sender_created, delivered = sender_socket.events
@@ -134,6 +136,8 @@ def test_mark_read_emits_one_cursor_event_only_when_read_cursor_advances(api):
     socket = RecordingSocket()
     events = api.app.state.events
     events.connections["EA3GNU"].add(socket)
+    events.sessions["read-session"] = socket
+    events.router.presence.set_websocket("EA3GNU", "read-session")
 
     try:
         first = api.post("/api/v1/conversations/EA3GNU/read", headers=abc)
@@ -154,7 +158,7 @@ def test_mark_read_emits_one_cursor_event_only_when_read_cursor_advances(api):
         assert second.json() == first.json()
         assert len(socket.events) == 1
     finally:
-        events.remove("EA3GNU", socket)
+        events.remove("EA3GNU", socket, "read-session")
 
 
 def test_conversation_last_message_projects_read_status(api):
