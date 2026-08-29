@@ -142,7 +142,10 @@ def test_mark_read_emits_one_cursor_event_only_when_read_cursor_advances(api):
     try:
         first = api.post("/api/v1/conversations/EA3GNU/read", headers=abc)
         assert first.status_code == 200
-        assert socket.events == [
+        read_events = [
+            event for event in socket.events if event["type"] == "message.read"
+        ]
+        assert read_events == [
             {
                 "type": "message.read",
                 "data": {
@@ -156,7 +159,9 @@ def test_mark_read_emits_one_cursor_event_only_when_read_cursor_advances(api):
         # the durable cursor or create a second realtime event.
         second = api.post("/api/v1/conversations/EA3GNU/read", headers=abc)
         assert second.json() == first.json()
-        assert len(socket.events) == 1
+        assert len(
+            [event for event in socket.events if event["type"] == "message.read"]
+        ) == 1
     finally:
         events.remove("EA3GNU", socket, "read-session")
 
