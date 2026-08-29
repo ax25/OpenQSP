@@ -21,6 +21,20 @@ class FakeReader:
         return self.lines.pop(0) if self.lines else b""
 
 
+class HangingReader:
+    def __init__(self, lines: list[str] | None = None) -> None:
+        self.lines = [f"{line}\r\n".encode() for line in (lines or [])]
+
+    def at_eof(self) -> bool:
+        return False
+
+    async def readline(self) -> bytes:
+        if self.lines:
+            return self.lines.pop(0)
+        await asyncio.sleep(3600)
+        return b""
+
+
 class FakeWriter:
     def __init__(self) -> None:
         self.data: list[bytes] = []
@@ -146,7 +160,11 @@ def test_connection_writes_and_logs_outbound_ack(
 
 def test_run_reconnects_after_connector_failure_without_real_sleep() -> None:
     adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
-    config = APRSISConfig(passcode="external", reconnect_delay=0)
+    config = APRSISConfig(
+        passcode="external",
+        reconnect_delay=0,
+        reconnect_max_delay=0,
+    )
     calls = 0
     writer = FakeWriter()
 
@@ -167,3 +185,70 @@ def test_run_reconnects_after_connector_failure_without_real_sleep() -> None:
         "user OPENQSP pass external vers OpenQSP 0.1 filter g/OPENQSP"
     )
     assert writer.closed
+
+
+def test_login_watchdog_closes_socket_that_never_verifies() -> None:
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    client = APRSISClient(
+        adapter,
+        APRSISConfig(
+            passcode="external",
+            login_timeout=0.03,
+            idle_timeout=1,
+            poll_interval=0.005,
+        ),
+    )
+    client.running = True
+    writer = FakeWriter()
+
+    with pytest.raises(ConnectionError, match="login timed out"):
+        asyncio.run(client._connection(HangingReader(), writer))
+
+    assert writer.closed
+
+
+def test_idle_watchdog_reconnects_verified_but_silent_socket() -> None:
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    client = APRSISClient(
+        adapter,
+        APRSISConfig(
+            passcode="external",
+            login_timeout=1,
+            idle_timeout=0.03,
+            poll_interval=0.005,
+        ),
+    )
+    client.running = True
+    writer = FakeWriter()
+
+    with pytest.raises(ConnectionError, match="became idle"):
+        asyncio.run(
+            client._connection(
+                HangingReader(["# logresp OPENQSP verified, server LOCAL"]),
+                writer,
+            )
+        )
+
+    assert writer.closed
+
+
+def test_pending_application_packet_is_not_sent_before_verified_login() -> None:
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities()))
+    client = APRSISClient(
+        adapter,
+        APRSISConfig(
+            passcode="external",
+            login_timeout=0.03,
+            idle_timeout=1,
+            poll_interval=0.005,
+        ),
+    )
+    client.running = True
+    writer = FakeWriter()
+
+    with pytest.raises(ConnectionError, match="login timed out"):
+        asyncio.run(client._connection(HangingReader(), writer))
+
+    assert writer.data == []
+    assert adapter.queued_count == adapter.pending_count == 0
