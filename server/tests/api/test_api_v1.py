@@ -359,7 +359,17 @@ def test_http_uses_core_once_and_core_ingress_reaches_websocket_and_sync(api):
             headers={**gnu, "Idempotency-Key": "shared-core"},
             json={"to": "EA3ABC", "body": "from HTTP"},
         )
-        assert repeated.json() == sent.json()
+        sent_message = sent.json()["message"]
+        repeated_message = repeated.json()["message"]
+        assert {
+            key: repeated_message[key]
+            for key in ("id", "from", "to", "body", "created_at")
+        } == {
+            key: sent_message[key]
+            for key in ("id", "from", "to", "body", "created_at")
+        }
+        assert repeated_message["delivery_status"] == "delivered"
+        assert repeated_message["delivered_at"] is not None
         assert len(observed) == 1
 
         responses = core.handle_frame(
