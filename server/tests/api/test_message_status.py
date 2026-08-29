@@ -55,7 +55,7 @@ def receive_json(socket, label, timeout=3.0):
     def receive():
         try:
             result.put((True, socket.receive_json()))
-        except BaseException as error:  # pragma: no cover - diagnostic path
+        except Exception as error:  # pragma: no cover - diagnostic path
             result.put((False, error))
 
     threading.Thread(target=receive, daemon=True).start()
