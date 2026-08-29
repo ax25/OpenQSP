@@ -16,6 +16,7 @@ from openqsp.transport.aprs.aprsis import APRSISClient, APRSISConfig
 
 from .config import ConfigurationError, ServerConfig, load_dotenv
 from .core import ServerCore
+from .presence import DeliveryRouter
 from .tcp import TCPServer
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,8 @@ class OpenQSPServer:
         self.core = ServerCore(
             message_store=self.message_store, bulletin_store=self.bulletin_store
         )
+        self.delivery_router = DeliveryRouter()
+        self.core.add_message_listener(self.delivery_router.listener)
         self.tcp: TCPServer | None = None
         self.aprs_adapter: APRSAdapter | None = None
         self.aprs_client: APRSISClient | None = None
@@ -71,7 +74,9 @@ class OpenQSPServer:
         if self.config.aprs_enabled:
             assert self.config.aprs_callsign and self.config.aprs_passcode
             self.aprs_adapter = self._adapter_factory(
-                self.core, service_callsign=self.config.aprs_callsign
+                self.core,
+                service_callsign=self.config.aprs_callsign,
+                router=self.delivery_router,
             )
             aprs_config = APRSISConfig(
                 callsign=self.config.aprs_callsign,
@@ -90,7 +95,7 @@ class OpenQSPServer:
             from openqsp.api import EventHub, create_api
 
             assert self.config.api_token_secret
-            hub = EventHub()
+            hub = EventHub(self.delivery_router)
             api = create_api(
                 accounts=self.account_store,
                 messages=self.message_store,
@@ -99,6 +104,7 @@ class OpenQSPServer:
                 token_lifetime=self.config.api_token_lifetime,
                 cors_origins=self.config.api_cors_origins,
                 hub=hub,
+                router=self.delivery_router,
             )
             self._api_server = uvicorn.Server(
                 uvicorn.Config(

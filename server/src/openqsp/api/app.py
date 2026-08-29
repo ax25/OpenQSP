@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import time
+import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from typing import Annotated, Any
@@ -29,6 +30,7 @@ from pydantic import BaseModel, ConfigDict
 from openqsp.protocol import Message, normalize_callsign
 from openqsp.protocol.errors import FieldTooLongError, InvalidFieldError
 from openqsp.server.core import ServerCore
+from openqsp.server.presence import DeliveryRouter
 from openqsp.storage import (
     AccountStore,
     IdempotencyConflictError,
@@ -135,32 +137,113 @@ class Signer:
 
 
 class EventHub:
-    def __init__(self) -> None:
+    def __init__(self, router: DeliveryRouter | None = None) -> None:
         self.connections: dict[str, set[WebSocket]] = defaultdict(set)
+        self.sessions: dict[str, WebSocket] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
         self.internet_delivery: Callable[[str, int, int], bool] | None = None
+        self.router = router or DeliveryRouter()
+        self.router.websocket_delivery = self.websocket_delivery
+        self._connection_lock = asyncio.Lock()
 
-    async def connect(self, callsign: str, socket: WebSocket) -> None:
+    async def connect(self, callsign: str, socket: WebSocket) -> str:
         await socket.accept()
-        self.connections[callsign].add(socket)
+        async with self._connection_lock:
+            # WebSocket ownership is tracked independently from transport
+            # presence. Presence may currently be APRS while an older socket is
+            # still unwinding, and that socket must still be superseded.
+            previous_sockets = tuple(self.connections.pop(callsign, ()))
+            for old in previous_sockets:
+                old_sessions = tuple(
+                    session_id
+                    for session_id, connected in self.sessions.items()
+                    if connected is old
+                )
+                for old_session_id in old_sessions:
+                    self.sessions.pop(old_session_id, None)
+                try:
+                    await old.close(code=4001, reason="superseded by a newer session")
+                except (OSError, RuntimeError, WebSocketDisconnect):
+                    pass
 
-    def remove(self, callsign: str, socket: WebSocket) -> None:
+            session_id = uuid.uuid4().hex
+            self.router.presence.set_websocket(callsign, session_id)
+            self.connections[callsign].add(socket)
+            self.sessions[session_id] = socket
+            return session_id
+
+    def remove(
+        self,
+        callsign: str,
+        socket: WebSocket,
+        session_id: str | None = None,
+    ) -> None:
         self.connections[callsign].discard(socket)
         if not self.connections[callsign]:
             self.connections.pop(callsign, None)
+        if session_id is None:
+            session_id = next(
+                (
+                    candidate
+                    for candidate, connected in self.sessions.items()
+                    if connected is socket
+                ),
+                None,
+            )
+        if session_id is not None:
+            self.sessions.pop(session_id, None)
+            self.router.presence.clear_websocket(callsign, session_id)
 
-    async def emit(self, message: dict[str, Any], sequence: int) -> None:
-        users = {message["from"], message["to"]}
-        recipient_delivered = False
-        for user in users:
-            for socket in tuple(self.connections.get(user, ())):
-                try:
-                    await socket.send_json({"type": "message.created", "data": message})
-                    if user == message["to"]:
-                        recipient_delivered = True
-                except (OSError, RuntimeError, WebSocketDisconnect):
-                    self.remove(user, socket)
-        if recipient_delivered:
+    def websocket_delivery(self, value: Message, session_id: str) -> bool:
+        if self.loop is None or session_id not in self.sessions:
+            return False
+        asyncio.run_coroutine_threadsafe(
+            self.emit_recipient(self._payload(value), value.sequence, session_id),
+            self.loop,
+        )
+        return True
+
+    def _authoritative_socket(
+        self, callsign: str
+    ) -> tuple[str, WebSocket] | None:
+        presence = self.router.presence.get(callsign)
+        if presence is None or presence.session_id is None:
+            return None
+        socket = self.sessions.get(presence.session_id)
+        if socket is None or socket not in self.connections.get(callsign, ()):
+            return None
+        return presence.session_id, socket
+
+    @staticmethod
+    def _payload(value: Message) -> dict[str, Any]:
+        return {
+            "id": _message_id(value.recipient, value.sequence),
+            "from": value.author,
+            "to": value.recipient,
+            "body": value.body,
+            "created_at": _timestamp(value.created_at),
+            "delivery_status": "stored",
+            "delivered_at": None,
+        }
+
+    async def emit_author(self, message: dict[str, Any]) -> None:
+        active = self._authoritative_socket(message["from"])
+        if active is None:
+            return
+        session_id, socket = active
+        try:
+            await socket.send_json({"type": "message.created", "data": message})
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            self.remove(message["from"], socket, session_id)
+
+    async def emit_recipient(
+        self, message: dict[str, Any], sequence: int, session_id: str
+    ) -> None:
+        socket = self.sessions.get(session_id)
+        if socket is None:
+            return
+        try:
+            await socket.send_json({"type": "message.created", "data": message})
             recorder = self.internet_delivery
             if recorder is not None:
                 delivered_at = int(time.time())
@@ -168,16 +251,21 @@ class EventHub:
                     await self.emit_delivery(
                         message["from"], message["id"], delivered_at
                     )
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            self.remove(message["to"], socket, session_id)
 
     async def emit_delivery(
         self, callsign: str, message_id: str, delivered_at: int
     ) -> None:
         payload = {"id": message_id, "delivered_at": _timestamp(delivered_at)}
-        for socket in tuple(self.connections.get(callsign, ())):
-            try:
-                await socket.send_json({"type": "message.delivered", "data": payload})
-            except (OSError, RuntimeError, WebSocketDisconnect):
-                self.remove(callsign, socket)
+        active = self._authoritative_socket(callsign)
+        if active is None:
+            return
+        session_id, socket = active
+        try:
+            await socket.send_json({"type": "message.delivered", "data": payload})
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            self.remove(callsign, socket, session_id)
 
     async def emit_read(
         self, callsign: str, reader: str, last_read_message_id: str
@@ -186,25 +274,19 @@ class EventHub:
             "peer": reader,
             "last_read_message_id": last_read_message_id,
         }
-        for socket in tuple(self.connections.get(callsign, ())):
-            try:
-                await socket.send_json({"type": "message.read", "data": payload})
-            except (OSError, RuntimeError, WebSocketDisconnect):
-                self.remove(callsign, socket)
+        active = self._authoritative_socket(callsign)
+        if active is None:
+            return
+        session_id, socket = active
+        try:
+            await socket.send_json({"type": "message.read", "data": payload})
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            self.remove(callsign, socket, session_id)
 
     def listener(self, value: Message) -> None:
         if self.loop is not None:
-            payload = {
-                "id": _message_id(value.recipient, value.sequence),
-                "from": value.author,
-                "to": value.recipient,
-                "body": value.body,
-                "created_at": _timestamp(value.created_at),
-                "delivery_status": "stored",
-                "delivered_at": None,
-            }
             asyncio.run_coroutine_threadsafe(
-                self.emit(payload, value.sequence), self.loop
+                self.emit_author(self._payload(value)), self.loop
             )
 
     def delivery_listener(self, value: StoredMessage, delivered_at: int) -> None:
@@ -260,12 +342,14 @@ def create_api(
     token_lifetime: int = 3600,
     cors_origins: tuple[str, ...] = (),
     hub: EventHub | None = None,
+    router: DeliveryRouter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="OpenQSP Internet API", version="1.0.0")
-    signer, events = Signer(secret, token_lifetime), hub or EventHub()
+    signer, events = Signer(secret, token_lifetime), hub or EventHub(router)
     bearer = HTTPBearer(auto_error=False)
     app.state.events = events
     core.add_message_listener(events.listener)
+    core.add_message_listener(events.router.listener)
     core.add_delivery_listener(events.delivery_listener)
     events.internet_delivery = lambda recipient, sequence, delivered_at: messages.set_delivery(
         recipient=recipient,
@@ -499,13 +583,13 @@ def create_api(
         except APIError:
             await socket.close(code=4401)
             return
-        await events.connect(callsign, socket)
+        session_id = await events.connect(callsign, socket)
         try:
             while True:
                 await socket.receive_text()
         except WebSocketDisconnect:
             pass
         finally:
-            events.remove(callsign, socket)
+            events.remove(callsign, socket, session_id)
 
     return app

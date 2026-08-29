@@ -87,7 +87,8 @@ class ServerCore:
         self._delivery_listeners: list[Callable[[StoredMessage, int], object]] = []
 
     def add_message_listener(self, listener: Callable[[Message], object]) -> None:
-        self._message_listeners.append(listener)
+        if listener not in self._message_listeners:
+            self._message_listeners.append(listener)
 
     def remove_message_listener(self, listener: Callable[[Message], object]) -> None:
         try:

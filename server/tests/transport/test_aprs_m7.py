@@ -14,7 +14,7 @@ from openqsp.protocol import (
     encode_frame,
 )
 from openqsp.protocol.constants import UNSOLICITED_FLAG
-from openqsp.server import ServerCore
+from openqsp.server import DeliveryRouter, ServerCore
 from openqsp.storage import BulletinStore, Database, MessageStore
 from openqsp.transport.aprs import AdapterConfig, APRSAdapter
 from openqsp.transport.aprs.carriage import APRSFragment, fragment_frame, parse_fragment
@@ -249,6 +249,8 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
 ) -> None:
     now = [0.0]
     core, messages = database_core(tmp_path / "aprs.sqlite")
+    router = DeliveryRouter()
+    core.add_message_listener(router.listener)
     adapter = APRSAdapter(
         core,
         config=AdapterConfig(
@@ -258,6 +260,7 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
             activity_timeout=10,
         ),
         clock=lambda: now[0],
+        router=router,
     )
     recipient = "EA3BBB-10"
     assert (
@@ -271,6 +274,7 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
         == "completed"
     )
     assert drain_frame(adapter, recipient, now[0]) is not None
+    router.presence.set_aprs("EA3BBB", recipient)
 
     send = encode_frame(SendMessage(1, "EA3BBB", "durable proactive mail"))
     assert deliver(adapter, "EA3AAA-7", send, "101", now=now[0]) == "completed"
@@ -304,6 +308,7 @@ def test_proactive_delivery_is_unsolicited_durable_and_reactivates(
     ]
 
     now[0] = 11
+    router.presence.clear_aprs("EA3BBB", recipient)
     inactive = encode_frame(SendMessage(3, "EA3BBB", "inactive"))
     assert deliver(adapter, "EA3AAA-7", inactive, "103", now=11) == "completed"
     assert not any(item.peer == recipient for item in adapter._queue)
