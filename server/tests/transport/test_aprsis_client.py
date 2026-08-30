@@ -6,7 +6,7 @@ import pytest
 from openqsp.protocol import GetCapabilities, encode_frame
 from openqsp.server import ServerCore
 from openqsp.transport.aprs import AdapterConfig, APRSAdapter
-from openqsp.transport.aprs.aprsis import APRSISClient, APRSISConfig
+from openqsp.transport.aprs.aprsis import APRSISClient, APRSISConfig, parse_packet
 from openqsp.transport.aprs.carriage import APRSFragment, fragment_frame
 
 
@@ -104,7 +104,7 @@ def test_connection_login_receive_emit_ignore_and_cleanup_without_network(
     )
     assert "OPENQSP>APOQSP,TCPIP*::EA3AAA-10:ack4F" in output
     assert (
-        "APRS packet received: from=EA3GNU-7 to=OPENQSP body='Hola OpenQSP'"
+        "APRS packet received: from=EA3GNU-7 to=OPENQSP igate=- body='Hola OpenQSP'"
         in caplog.text
     )
     assert "Do not log this body" not in caplog.text
@@ -252,3 +252,34 @@ def test_pending_application_packet_is_not_sent_before_verified_login() -> None:
 
     assert writer.data == []
     assert adapter.queued_count == adapter.pending_count == 0
+
+
+def test_parse_packet_extracts_igate_after_qa_construct() -> None:
+    parsed = parse_packet(
+        "EA3GNU-5>APOQSP,WIDE1-1,WIDE2-1,qAR,EA3XYZ-10::OPENQSP  :Hola"
+    )
+
+    assert parsed == ("EA3GNU-5", "OPENQSP", "Hola", "EA3XYZ-10")
+
+
+def test_last_igate_is_tracked_by_base_callsign_and_not_overwritten_by_tcp() -> None:
+    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    client = APRSISClient(adapter, APRSISConfig(passcode="external"))
+    client.running = True
+    writer = FakeWriter()
+
+    asyncio.run(
+        client._connection(
+            FakeReader(
+                [
+                    "# logresp OPENQSP verified, server LOCAL",
+                    "EA3GNU-5>APOQSP,WIDE1-1,qAR,EA3IGT-10::OPENQSP  :Hola RF",
+                    "EA3GNU-7>APOQSP,TCPIP*::OPENQSP  :Hola IS",
+                ]
+            ),
+            writer,
+        )
+    )
+
+    assert client.last_igate_for("EA3GNU") == "EA3IGT-10"
+    assert client.last_igate_for("EA3GNU-7") == "EA3IGT-10"
