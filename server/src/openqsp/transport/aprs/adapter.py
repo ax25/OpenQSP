@@ -229,6 +229,34 @@ class APRSAdapter:
             self._order += 1
         return transaction_id
 
+    def _supersede_stale_response_batches(
+        self, peer: str, current_batch: tuple[str, str]
+    ) -> None:
+        """Drop older request responses for a peer without touching proactive delivery."""
+        stale_batches = {
+            item.response_batch
+            for item in self._queue
+            if item.peer == peer
+            and item.response_batch is not None
+            and item.response_batch != current_batch
+        }
+        stale_batches.update(
+            pending.response_batch
+            for (pending_peer, _), pending in self._pending.items()
+            if pending_peer == peer
+            and pending.response_batch is not None
+            and pending.response_batch != current_batch
+        )
+        if not stale_batches:
+            return
+        self._queue = [
+            item for item in self._queue if item.response_batch not in stale_batches
+        ]
+        heapq.heapify(self._queue)
+        for key, pending in tuple(self._pending.items()):
+            if key[0] == peer and pending.response_batch in stale_batches:
+                del self._pending[key]
+
     def receive(self, peer: str, body: str, *, now: float | None = None) -> str:
         """Accept one APRS message body; returns a stable disposition string."""
         now = self.clock() if now is None else now
@@ -277,6 +305,7 @@ class APRSAdapter:
             if cached.request != frame:
                 return "conflict"
             self._activate_aprs_if_accepted(peer, cached.responses)
+            self._supersede_stale_response_batches(peer, response_batch)
             for response in cached.responses:
                 self.queue_frame(peer, response, response_batch=response_batch)
             return "replayed"
@@ -295,6 +324,7 @@ class APRSAdapter:
         callsign = normalize_callsign(peer, "APRS source")
         responses = tuple(self.core.handle_frame(callsign, frame))
         self._activate_aprs_if_accepted(peer, responses)
+        self._supersede_stale_response_batches(peer, response_batch)
         self.replay.put(peer, fragment.transaction_id, frame, responses, now)
         self._expire_activity(now)
         if (
