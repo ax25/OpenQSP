@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "rotate.aprs2.net"
 DEFAULT_PORT = 14580
-_PACKET_RE = re.compile(r"([^>]+)>[^:]+::(.{9}):(.*)")
+_PACKET_RE = re.compile(r"([^>]+)>([^:]+)::(.{9}):(.*)")
 _LOGRESP_RE = re.compile(
     r"# logresp ([^ ]+) (verified|unverified)(?:,.*)?", re.IGNORECASE
 )
@@ -79,12 +79,28 @@ def parse_logresp(line: str, callsign: str = SERVICE_CALLSIGN) -> bool | None:
     return match.group(2).lower() == "verified"
 
 
-def parse_packet(line: str) -> tuple[str, str, str] | None:
+def _igate_from_header(header: str) -> str | None:
+    """Return the APRS-IS entry station following a qA construct, if present."""
+    parts = [part.strip().upper() for part in header.split(",")]
+    for index, part in enumerate(parts[:-1]):
+        if re.fullmatch(r"QA[A-Z]", part) is not None:
+            igate = parts[index + 1]
+            if igate and igate not in {"TCPIP", "TCPIP*"}:
+                return igate.rstrip("*")
+    return None
+
+
+def parse_packet(line: str) -> tuple[str, str, str, str | None] | None:
     match = _PACKET_RE.fullmatch(line.rstrip("\r\n"))
     if match is None:
         return None
-    source, addressee, body = match.groups()
-    return source.upper(), addressee.strip().upper(), body
+    source, header, addressee, body = match.groups()
+    return (
+        source.upper(),
+        addressee.strip().upper(),
+        body,
+        _igate_from_header(header),
+    )
 
 
 def format_packet(
@@ -93,10 +109,6 @@ def format_packet(
     return (
         f"{packet.source}>{destination},{path}::{packet.destination:<9}:{packet.body}"
     )
-
-
-def _log_decoded(description: str) -> None:
-    logger.info("%s  decoded: %s%s", _YELLOW, description, _RESET)
 
 
 class APRSISClient:
@@ -113,6 +125,15 @@ class APRSISClient:
         self.running = False
         self._writer: asyncio.StreamWriter | None = None
         self._diagnostics = APRSFrameDiagnostics()
+        self._last_igate: dict[str, str] = {}
+
+    @staticmethod
+    def _base_callsign(peer: str) -> str:
+        return peer.upper().partition("-")[0]
+
+    def last_igate_for(self, peer: str) -> str | None:
+        """Return the last IGate that injected an RF packet from this callsign."""
+        return self._last_igate.get(self._base_callsign(peer))
 
     async def run(self) -> None:
         self.running = True
@@ -205,19 +226,27 @@ class APRSISClient:
                         logger.info("APRS-IS: connected and verified")
                     packet = parse_packet(line)
                     if packet is not None and verified:
-                        source, addressee, body = packet
+                        source, addressee, body, igate = packet
                         if addressee == self.config.callsign.upper():
+                            if igate is not None:
+                                self._last_igate[self._base_callsign(source)] = igate
                             logger.info(
-                                "APRS packet received: from=%s to=%s body=%r",
+                                "APRS packet received: from=%s to=%s igate=%s body=%r",
                                 source,
                                 addressee,
+                                igate or self.last_igate_for(source) or "-",
                                 body,
                             )
                             description = self._diagnostics.describe_received(
                                 source, body
                             )
                             if description is not None:
-                                _log_decoded(description)
+                                logger.info(
+                                    "%s  decoded: %s%s",
+                                    _YELLOW,
+                                    description,
+                                    _RESET,
+                                )
                             try:
                                 self.adapter.receive(source, body)
                             except Exception:
@@ -244,7 +273,12 @@ class APRSISClient:
                             outbound.destination, outbound.body
                         )
                         if description is not None:
-                            _log_decoded(description)
+                            logger.info(
+                                "%s  decoded: %s%s",
+                                _YELLOW,
+                                description,
+                                _RESET,
+                            )
                     await writer.drain()
 
             if self.running and not verified:
