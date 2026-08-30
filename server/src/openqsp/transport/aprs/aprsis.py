@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .adapter import SERVICE_CALLSIGN, APRSAdapter, OutboundPacket
+from .diagnostics import APRSFrameDiagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class APRSISClient:
         self.adapter, self.config, self.connector = adapter, config, connector
         self.running = False
         self._writer: asyncio.StreamWriter | None = None
+        self._diagnostics = APRSFrameDiagnostics()
 
     async def run(self) -> None:
         self.running = True
@@ -205,6 +207,11 @@ class APRSISClient:
                                 addressee,
                                 body,
                             )
+                            description = self._diagnostics.describe_received(
+                                source, body
+                            )
+                            if description is not None:
+                                logger.info("  decoded: %s", description)
                             try:
                                 self.adapter.receive(source, body)
                             except Exception:
@@ -227,6 +234,11 @@ class APRSISClient:
                             outbound.destination,
                             outbound.body,
                         )
+                        description = self._diagnostics.describe_sent(
+                            outbound.destination, outbound.body
+                        )
+                        if description is not None:
+                            logger.info("  decoded: %s", description)
                     await writer.drain()
 
             if self.running and not verified:
