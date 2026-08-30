@@ -21,6 +21,8 @@ _PACKET_RE = re.compile(r"([^>]+)>[^:]+::(.{9}):(.*)")
 _LOGRESP_RE = re.compile(
     r"# logresp ([^ ]+) (verified|unverified)(?:,.*)?", re.IGNORECASE
 )
+_YELLOW = "\x1b[33m"
+_RESET = "\x1b[0m"
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,10 @@ def format_packet(
     return (
         f"{packet.source}>{destination},{path}::{packet.destination:<9}:{packet.body}"
     )
+
+
+def _log_decoded(description: str) -> None:
+    logger.info("%s  decoded: %s%s", _YELLOW, description, _RESET)
 
 
 class APRSISClient:
@@ -211,7 +217,7 @@ class APRSISClient:
                                 source, body
                             )
                             if description is not None:
-                                logger.info("  decoded: %s", description)
+                                _log_decoded(description)
                             try:
                                 self.adapter.receive(source, body)
                             except Exception:
@@ -238,7 +244,7 @@ class APRSISClient:
                             outbound.destination, outbound.body
                         )
                         if description is not None:
-                            logger.info("  decoded: %s", description)
+                            _log_decoded(description)
                     await writer.drain()
 
             if self.running and not verified:
