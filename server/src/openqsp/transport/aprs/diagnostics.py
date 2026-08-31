@@ -76,7 +76,7 @@ class APRSFrameDiagnostics:
 
         try:
             obj, flags = decode_frame_with_flags(frame)
-        except Exception as exc:  # diagnostic path must never affect transport
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never affect transport
             return f"{prefix} core_decode_error={exc}"
         return f"{prefix} -> {format_core_object(obj, flags=flags)}"
 

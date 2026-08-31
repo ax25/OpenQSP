@@ -85,6 +85,7 @@ class _Queued:
     fragment: APRSFragment = field(compare=False)
     delivery: tuple[str, int] | None = field(default=None, compare=False)
     response_batch: tuple[str, str] | None = field(default=None, compare=False)
+    response_supersedable: bool = field(default=True, compare=False)
 
 
 @dataclass
@@ -96,6 +97,7 @@ class _Pending:
     transaction_id: str
     delivery: tuple[str, int] | None = None
     response_batch: tuple[str, str] | None = None
+    response_supersedable: bool = True
 
 
 class APRSAdapter:
@@ -199,6 +201,7 @@ class APRSAdapter:
         proactive: bool = False,
         delivery: tuple[str, int] | None = None,
         response_batch: tuple[str, str] | None = None,
+        response_supersedable: bool = True,
     ) -> str:
         self.validate_peer(peer)
         transaction_id = self._allocate(peer, transaction=True)
@@ -224,6 +227,7 @@ class APRSAdapter:
                     queued,
                     delivery,
                     response_batch,
+                    response_supersedable,
                 ),
             )
             self._order += 1
@@ -232,13 +236,14 @@ class APRSAdapter:
     def _supersede_stale_response_batches(
         self, peer: str, current_batch: tuple[str, str]
     ) -> None:
-        """Drop older request responses for a peer without touching proactive delivery."""
+        """Drop only replaceable older responses for a peer."""
         stale_batches = {
             item.response_batch
             for item in self._queue
             if item.peer == peer
             and item.response_batch is not None
             and item.response_batch != current_batch
+            and item.response_supersedable
         }
         stale_batches.update(
             pending.response_batch
@@ -246,6 +251,7 @@ class APRSAdapter:
             if pending_peer == peer
             and pending.response_batch is not None
             and pending.response_batch != current_batch
+            and pending.response_supersedable
         )
         if not stale_batches:
             return
@@ -256,6 +262,27 @@ class APRSAdapter:
         for key, pending in tuple(self._pending.items()):
             if key[0] == peer and pending.response_batch in stale_batches:
                 del self._pending[key]
+
+    def _confirm_inbound(
+        self, peer: str, message_id: str | None, *, accepted: bool = True
+    ) -> None:
+        if message_id is None:
+            return
+        prefix = "ack" if accepted else "rej"
+        self._immediate.append(
+            OutboundPacket(
+                self.service_callsign,
+                peer,
+                f"{prefix}{message_id}",
+                accepted,
+            )
+        )
+
+    @staticmethod
+    def _responses_accepted(responses: tuple[bytes, ...]) -> bool:
+        return bool(responses) and not any(
+            isinstance(decode_frame(response), Error) for response in responses
+        )
 
     def receive(self, peer: str, body: str, *, now: float | None = None) -> str:
         """Accept one APRS message body; returns a stable disposition string."""
@@ -280,13 +307,11 @@ class APRSAdapter:
             if pending.delivery is not None and not transaction_outstanding:
                 self.core.mark_aprs_delivered(*pending.delivery)
             return "acknowledged"
-        message_id = _MESSAGE_ID_RE.search(body)
-        if message_id is not None:
-            self._immediate.append(
-                OutboundPacket(
-                    self.service_callsign, peer, f"ack{message_id.group(1)}", True
-                )
-            )
+
+        message_id_match = _MESSAGE_ID_RE.search(body)
+        inbound_message_id = (
+            message_id_match.group(1) if message_id_match is not None else None
+        )
         try:
             fragment = parse_fragment(body)
         except (CarriageError, TypeError):
@@ -294,21 +319,42 @@ class APRSAdapter:
         try:
             frame = self.reassembly.add(peer, fragment, now)
         except TransactionConflict:
+            self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "conflict"
         except CarriageError:
+            self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "invalid"
         if frame is None:
+            self._confirm_inbound(peer, inbound_message_id)
             return "fragment"
+
         response_batch = (peer, fragment.transaction_id)
         cached = self.replay.get(peer, fragment.transaction_id, now)
         if cached is not None:
             if cached.request != frame:
+                self._confirm_inbound(peer, inbound_message_id, accepted=False)
                 return "conflict"
+            cached_request = decode_frame(cached.request)
+            response_supersedable = not isinstance(cached_request, SendMessage)
             self._activate_aprs_if_accepted(peer, cached.responses)
             self._supersede_stale_response_batches(peer, response_batch)
+            if isinstance(cached_request, SendMessage) and inbound_message_id is not None:
+                self._confirm_inbound(
+                    peer,
+                    inbound_message_id,
+                    accepted=self._responses_accepted(cached.responses),
+                )
+                return "replayed"
+            self._confirm_inbound(peer, inbound_message_id)
             for response in cached.responses:
-                self.queue_frame(peer, response, response_batch=response_batch)
+                self.queue_frame(
+                    peer,
+                    response,
+                    response_batch=response_batch,
+                    response_supersedable=response_supersedable,
+                )
             return "replayed"
+
         request = decode_frame(frame)
         if not isinstance(
             request,
@@ -320,9 +366,14 @@ class APRSAdapter:
                 GetCapabilities,
             ),
         ):
+            self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "invalid"
+        if not isinstance(request, SendMessage):
+            self._confirm_inbound(peer, inbound_message_id)
+
         callsign = normalize_callsign(peer, "APRS source")
         responses = tuple(self.core.handle_frame(callsign, frame))
+        response_supersedable = not isinstance(request, SendMessage)
         self._activate_aprs_if_accepted(peer, responses)
         self._supersede_stale_response_batches(peer, response_batch)
         self.replay.put(peer, fragment.transaction_id, frame, responses, now)
@@ -336,6 +387,15 @@ class APRSAdapter:
         self._activity[peer] = (callsign, now)
         self.completed_transactions.append((peer, fragment.transaction_id))
         del self.completed_transactions[: -self.config.event_history_capacity]
+
+        if isinstance(request, SendMessage) and inbound_message_id is not None:
+            self._confirm_inbound(
+                peer,
+                inbound_message_id,
+                accepted=self._responses_accepted(responses),
+            )
+            return "completed"
+
         for response in responses:
             decoded = decode_frame(response)
             delivery = (
@@ -348,6 +408,7 @@ class APRSAdapter:
                 response,
                 delivery=delivery,
                 response_batch=response_batch,
+                response_supersedable=response_supersedable,
             )
             if delivery is not None:
                 self.core.mark_aprs_pending(*delivery)
@@ -444,6 +505,7 @@ class APRSAdapter:
                     item.fragment.transaction_id,
                     item.delivery,
                     item.response_batch,
+                    item.response_supersedable,
                 )
                 self._last_send[item.peer] = now
                 packets.append(packet)
