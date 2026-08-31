@@ -85,6 +85,7 @@ class _Queued:
     fragment: APRSFragment = field(compare=False)
     delivery: tuple[str, int] | None = field(default=None, compare=False)
     response_batch: tuple[str, str] | None = field(default=None, compare=False)
+    response_supersedable: bool = field(default=True, compare=False)
 
 
 @dataclass
@@ -96,6 +97,7 @@ class _Pending:
     transaction_id: str
     delivery: tuple[str, int] | None = None
     response_batch: tuple[str, str] | None = None
+    response_supersedable: bool = True
 
 
 class APRSAdapter:
@@ -199,6 +201,7 @@ class APRSAdapter:
         proactive: bool = False,
         delivery: tuple[str, int] | None = None,
         response_batch: tuple[str, str] | None = None,
+        response_supersedable: bool = True,
     ) -> str:
         self.validate_peer(peer)
         transaction_id = self._allocate(peer, transaction=True)
@@ -224,6 +227,7 @@ class APRSAdapter:
                     queued,
                     delivery,
                     response_batch,
+                    response_supersedable,
                 ),
             )
             self._order += 1
@@ -232,13 +236,20 @@ class APRSAdapter:
     def _supersede_stale_response_batches(
         self, peer: str, current_batch: tuple[str, str]
     ) -> None:
-        """Drop older request responses for a peer without touching proactive delivery."""
+        """Drop only replaceable older responses for a peer.
+
+        SEND_MESSAGE responses are durable operation confirmations. They must
+        stay queued until ACKed or exhausted even if the same peer sends a
+        newer request, otherwise a later STORED can be mistaken for an earlier
+        send by clients that still rely on FIFO confirmation semantics.
+        """
         stale_batches = {
             item.response_batch
             for item in self._queue
             if item.peer == peer
             and item.response_batch is not None
             and item.response_batch != current_batch
+            and item.response_supersedable
         }
         stale_batches.update(
             pending.response_batch
@@ -246,6 +257,7 @@ class APRSAdapter:
             if pending_peer == peer
             and pending.response_batch is not None
             and pending.response_batch != current_batch
+            and pending.response_supersedable
         )
         if not stale_batches:
             return
@@ -304,10 +316,17 @@ class APRSAdapter:
         if cached is not None:
             if cached.request != frame:
                 return "conflict"
+            cached_request = decode_frame(cached.request)
+            response_supersedable = not isinstance(cached_request, SendMessage)
             self._activate_aprs_if_accepted(peer, cached.responses)
             self._supersede_stale_response_batches(peer, response_batch)
             for response in cached.responses:
-                self.queue_frame(peer, response, response_batch=response_batch)
+                self.queue_frame(
+                    peer,
+                    response,
+                    response_batch=response_batch,
+                    response_supersedable=response_supersedable,
+                )
             return "replayed"
         request = decode_frame(frame)
         if not isinstance(
@@ -323,6 +342,7 @@ class APRSAdapter:
             return "invalid"
         callsign = normalize_callsign(peer, "APRS source")
         responses = tuple(self.core.handle_frame(callsign, frame))
+        response_supersedable = not isinstance(request, SendMessage)
         self._activate_aprs_if_accepted(peer, responses)
         self._supersede_stale_response_batches(peer, response_batch)
         self.replay.put(peer, fragment.transaction_id, frame, responses, now)
@@ -348,6 +368,7 @@ class APRSAdapter:
                 response,
                 delivery=delivery,
                 response_batch=response_batch,
+                response_supersedable=response_supersedable,
             )
             if delivery is not None:
                 self.core.mark_aprs_pending(*delivery)
@@ -444,6 +465,7 @@ class APRSAdapter:
                     item.fragment.transaction_id,
                     item.delivery,
                     item.response_batch,
+                    item.response_supersedable,
                 )
                 self._last_send[item.peer] = now
                 packets.append(packet)
