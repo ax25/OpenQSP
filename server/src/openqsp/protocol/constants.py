@@ -49,9 +49,9 @@ class Capability(IntFlag):
     BULLETIN_LISTING = 0x00000002
     BULLETIN_RETRIEVAL = 0x00000004
     PROACTIVE_PRIVATE_MESSAGES = 0x00000008
-    # APRS clients may opt in by using C-prefixed APRS message IDs. For those
-    # requests the ACK that completes SEND_MESSAGE is a durable commit ACK and
-    # replaces the separate STORED response.
+    # Reserved for the redesigned APRS transaction-level commit acknowledgement.
+    # Do not advertise this bit until fragment ACK and durable transaction commit
+    # are unambiguous under burst/out-of-order delivery.
     APRS_COMMIT_ACK = 0x00000010
 
 
@@ -60,7 +60,6 @@ IMPLEMENTED_CAPABILITIES = (
     | Capability.BULLETIN_LISTING
     | Capability.BULLETIN_RETRIEVAL
     | Capability.PROACTIVE_PRIVATE_MESSAGES
-    | Capability.APRS_COMMIT_ACK
 )
 
 
