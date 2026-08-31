@@ -210,6 +210,6 @@ def test_aprsis_lines() -> None:
     assert parse_logresp("# logresp OPENQSP verified, server T2TEST") is True
     assert parse_logresp("# logresp OPENQSP unverified") is False
     line = "EA3AAA>APRS,TCPIP*::OPENQSP  :Q1:000:00/01:AQ{01"
-    assert parse_packet(line) == ("EA3AAA", "OPENQSP", "Q1:000:00/01:AQ{01")
+    assert parse_packet(line) == ("EA3AAA", "OPENQSP", "Q1:000:00/01:AQ{01", None)
     packet = OutboundPacket("OPENQSP", "EA3AAA", "ack01", True)
     assert format_packet(packet) == "OPENQSP>APOQSP,TCPIP*::EA3AAA   :ack01"
