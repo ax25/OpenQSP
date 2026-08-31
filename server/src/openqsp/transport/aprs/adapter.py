@@ -61,7 +61,7 @@ class AdapterConfig:
             or self.activity_timeout <= 0
         ):
             raise ValueError("timeouts and attempts must be positive")
-        if self.min_interval < 0 or self.queue_capacity <= 0:
+        if self.min_interval < 0 or self.config.queue_capacity <= 0:
             raise ValueError("rate interval must be non-negative and queue bounded")
         if not 1 <= self.transaction_id_space <= 36**3:
             raise ValueError("transaction ID space must be between 1 and 46656")
@@ -236,13 +236,7 @@ class APRSAdapter:
     def _supersede_stale_response_batches(
         self, peer: str, current_batch: tuple[str, str]
     ) -> None:
-        """Drop only replaceable older responses for a peer.
-
-        SEND_MESSAGE responses are durable operation confirmations. They must
-        stay queued until ACKed or exhausted even if the same peer sends a
-        newer request, otherwise a later STORED can be mistaken for an earlier
-        send by clients that still rely on FIFO confirmation semantics.
-        """
+        """Drop only replaceable older responses for a peer."""
         stale_batches = {
             item.response_batch
             for item in self._queue
@@ -269,6 +263,27 @@ class APRSAdapter:
             if key[0] == peer and pending.response_batch in stale_batches:
                 del self._pending[key]
 
+    def _confirm_inbound(
+        self, peer: str, message_id: str | None, *, accepted: bool = True
+    ) -> None:
+        if message_id is None:
+            return
+        prefix = "ack" if accepted else "rej"
+        self._immediate.append(
+            OutboundPacket(
+                self.service_callsign,
+                peer,
+                f"{prefix}{message_id}",
+                accepted,
+            )
+        )
+
+    @staticmethod
+    def _responses_accepted(responses: tuple[bytes, ...]) -> bool:
+        return bool(responses) and not any(
+            isinstance(decode_frame(response), Error) for response in responses
+        )
+
     def receive(self, peer: str, body: str, *, now: float | None = None) -> str:
         """Accept one APRS message body; returns a stable disposition string."""
         now = self.clock() if now is None else now
@@ -292,13 +307,11 @@ class APRSAdapter:
             if pending.delivery is not None and not transaction_outstanding:
                 self.core.mark_aprs_delivered(*pending.delivery)
             return "acknowledged"
-        message_id = _MESSAGE_ID_RE.search(body)
-        if message_id is not None:
-            self._immediate.append(
-                OutboundPacket(
-                    self.service_callsign, peer, f"ack{message_id.group(1)}", True
-                )
-            )
+
+        message_id_match = _MESSAGE_ID_RE.search(body)
+        inbound_message_id = (
+            message_id_match.group(1) if message_id_match is not None else None
+        )
         try:
             fragment = parse_fragment(body)
         except (CarriageError, TypeError):
@@ -306,20 +319,33 @@ class APRSAdapter:
         try:
             frame = self.reassembly.add(peer, fragment, now)
         except TransactionConflict:
+            self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "conflict"
         except CarriageError:
+            self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "invalid"
         if frame is None:
+            self._confirm_inbound(peer, inbound_message_id)
             return "fragment"
+
         response_batch = (peer, fragment.transaction_id)
         cached = self.replay.get(peer, fragment.transaction_id, now)
         if cached is not None:
             if cached.request != frame:
+                self._confirm_inbound(peer, inbound_message_id, accepted=False)
                 return "conflict"
             cached_request = decode_frame(cached.request)
             response_supersedable = not isinstance(cached_request, SendMessage)
             self._activate_aprs_if_accepted(peer, cached.responses)
             self._supersede_stale_response_batches(peer, response_batch)
+            if isinstance(cached_request, SendMessage) and inbound_message_id is not None:
+                self._confirm_inbound(
+                    peer,
+                    inbound_message_id,
+                    accepted=self._responses_accepted(cached.responses),
+                )
+                return "replayed"
+            self._confirm_inbound(peer, inbound_message_id)
             for response in cached.responses:
                 self.queue_frame(
                     peer,
@@ -328,6 +354,7 @@ class APRSAdapter:
                     response_supersedable=response_supersedable,
                 )
             return "replayed"
+
         request = decode_frame(frame)
         if not isinstance(
             request,
@@ -339,7 +366,11 @@ class APRSAdapter:
                 GetCapabilities,
             ),
         ):
+            self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "invalid"
+        if not isinstance(request, SendMessage):
+            self._confirm_inbound(peer, inbound_message_id)
+
         callsign = normalize_callsign(peer, "APRS source")
         responses = tuple(self.core.handle_frame(callsign, frame))
         response_supersedable = not isinstance(request, SendMessage)
@@ -356,6 +387,15 @@ class APRSAdapter:
         self._activity[peer] = (callsign, now)
         self.completed_transactions.append((peer, fragment.transaction_id))
         del self.completed_transactions[: -self.config.event_history_capacity]
+
+        if isinstance(request, SendMessage) and inbound_message_id is not None:
+            self._confirm_inbound(
+                peer,
+                inbound_message_id,
+                accepted=self._responses_accepted(responses),
+            )
+            return "completed"
+
         for response in responses:
             decoded = decode_frame(response)
             delivery = (
