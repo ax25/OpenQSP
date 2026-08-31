@@ -1,7 +1,6 @@
 """APRS profile v0.1 transport adapter."""
 
 from .adapter import AdapterConfig, OutboundPacket
-from .commit_adapter import APRSAdapter
 from .carriage import (
     APRSFragment,
     CarriageError,
@@ -10,6 +9,7 @@ from .carriage import (
     fragment_frame,
     parse_fragment,
 )
+from .commit_adapter import APRSAdapter
 
 __all__ = [
     "APRSAdapter", "APRSFragment", "AdapterConfig", "CarriageError",
