@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from openqsp.protocol import (
-    Error,
     GetBulletin,
     GetCapabilities,
     GetNewBulletins,
@@ -15,8 +14,8 @@ from openqsp.protocol import (
     normalize_callsign,
 )
 
-from .adapter import APRSAdapter as _BaseAPRSAdapter
 from .adapter import _ACK_RE, _MESSAGE_ID_RE
+from .adapter import APRSAdapter as _BaseAPRSAdapter
 from .carriage import CarriageError, parse_fragment
 from .commit_ack import requested as commit_ack_requested
 from .state import TransactionConflict
