@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from openqsp.protocol import (
+    Error,
     GetBulletin,
     GetCapabilities,
     GetNewBulletins,
     GetNewMessages,
     Message,
     SendMessage,
+    Stored,
     decode_frame,
     normalize_callsign,
 )
@@ -23,10 +25,21 @@ from .state import TransactionConflict
 class APRSAdapter(_BaseAPRSAdapter):
     """APRS adapter with opt-in durable ACKs for SEND_MESSAGE.
 
-    Clients opt in by using a C-prefixed APRS message ID after discovering the
-    APRS_COMMIT_ACK capability. Legacy IDs retain immediate transport ACK plus
-    the normal OpenQSP STORED/ERROR response, so old and new clients can coexist.
+    After discovering the APRS_COMMIT_ACK capability, clients opt in by using a
+    C-prefixed APRS message ID. Legacy IDs preserve the pre-extension behavior:
+    they are ACKed as soon as the APRS packet is received and SEND_MESSAGE keeps
+    its normal OpenQSP STORED/ERROR response.
+
+    For an opted-in SEND_MESSAGE, non-final Q1 fragments are ACKed normally,
+    while the fragment that completes the Core request is ACKed only after Core
+    returns STORED. A failed Core send is answered with APRS REJ instead. The
+    same rule is applied to replayed Q1 transactions, so a lost commit ACK can
+    be recovered without executing SEND_MESSAGE twice.
     """
+
+    @staticmethod
+    def _send_was_stored(responses: tuple[bytes, ...]) -> bool:
+        return len(responses) == 1 and isinstance(decode_frame(responses[0]), Stored)
 
     def receive(self, peer: str, body: str, *, now: float | None = None) -> str:
         now = self.clock() if now is None else now
@@ -58,44 +71,58 @@ class APRSAdapter(_BaseAPRSAdapter):
         )
         commit_ack = commit_ack_requested(inbound_message_id)
 
+        # Legacy APRS message IDs retain the historical transport contract:
+        # ACK first, then attempt to parse/process the OpenQSP payload.
+        if inbound_message_id is not None and not commit_ack:
+            self._confirm_inbound(peer, inbound_message_id)
+
         try:
             fragment = parse_fragment(body)
         except (CarriageError, TypeError):
+            if commit_ack:
+                self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "ignored"
         try:
             frame = self.reassembly.add(peer, fragment, now)
         except TransactionConflict:
-            self._confirm_inbound(peer, inbound_message_id, accepted=False)
+            if commit_ack:
+                self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "conflict"
         except CarriageError:
-            self._confirm_inbound(peer, inbound_message_id, accepted=False)
+            if commit_ack:
+                self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "invalid"
 
+        # A C-prefixed ID on a non-final Q1 fragment is still an ordinary
+        # fragment-level ACK. Only the fragment completing SEND_MESSAGE carries
+        # the durable commit meaning.
         if frame is None:
-            self._confirm_inbound(peer, inbound_message_id)
+            if commit_ack:
+                self._confirm_inbound(peer, inbound_message_id)
             return "fragment"
 
         response_batch = (peer, fragment.transaction_id)
         cached = self.replay.get(peer, fragment.transaction_id, now)
         if cached is not None:
             if cached.request != frame:
-                self._confirm_inbound(peer, inbound_message_id, accepted=False)
+                if commit_ack:
+                    self._confirm_inbound(peer, inbound_message_id, accepted=False)
                 return "conflict"
             cached_request = decode_frame(cached.request)
             response_supersedable = not isinstance(cached_request, SendMessage)
             self._activate_aprs_if_accepted(peer, cached.responses)
             self._supersede_stale_response_batches(peer, response_batch)
+
             if isinstance(cached_request, SendMessage) and commit_ack:
                 self._confirm_inbound(
                     peer,
                     inbound_message_id,
-                    accepted=self._responses_accepted(cached.responses),
+                    accepted=self._send_was_stored(cached.responses),
                 )
                 return "replayed"
 
-            # Legacy path: transport ACK immediately and replay the original
-            # STORED/ERROR response just as the pre-commit-ACK profile did.
-            self._confirm_inbound(peer, inbound_message_id)
+            if commit_ack:
+                self._confirm_inbound(peer, inbound_message_id)
             for response in cached.responses:
                 self.queue_frame(
                     peer,
@@ -116,13 +143,14 @@ class APRSAdapter(_BaseAPRSAdapter):
                 GetCapabilities,
             ),
         ):
-            self._confirm_inbound(peer, inbound_message_id, accepted=False)
+            if commit_ack:
+                self._confirm_inbound(peer, inbound_message_id, accepted=False)
             return "invalid"
 
-        # Non-SEND operations and legacy SEND_MESSAGE IDs keep normal APRS
-        # transport ACK semantics. Commit-ACK SEND_MESSAGE delays the ACK until
-        # after ServerCore has durably accepted the operation.
-        if not isinstance(request, SendMessage) or not commit_ack:
+        # C-prefixed IDs are only special for SEND_MESSAGE. If a future/new
+        # client uses one on another supported operation, preserve normal ACK
+        # semantics rather than silently withholding the transport ACK.
+        if commit_ack and not isinstance(request, SendMessage):
             self._confirm_inbound(peer, inbound_message_id)
 
         callsign = normalize_callsign(peer, "APRS source")
@@ -146,7 +174,7 @@ class APRSAdapter(_BaseAPRSAdapter):
             self._confirm_inbound(
                 peer,
                 inbound_message_id,
-                accepted=self._responses_accepted(responses),
+                accepted=self._send_was_stored(responses),
             )
             return "completed"
 
