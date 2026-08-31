@@ -8,12 +8,19 @@ from openqsp.protocol import (
     encode_frame,
 )
 from openqsp.server import ServerCore
+from openqsp.storage import Database, MessageStore
 from openqsp.transport.aprs import AdapterConfig, APRSAdapter
 from openqsp.transport.aprs.carriage import (
     decode_frame_text,
     fragment_frame,
     parse_fragment,
 )
+
+
+def _core_with_store(tmp_path) -> ServerCore:
+    database = Database(tmp_path / "node.db")
+    database.initialize()
+    return ServerCore(message_store=MessageStore(database))
 
 
 def _deliver(
@@ -43,12 +50,14 @@ def _decode_packet_body(body: str):
     return decode_frame(decode_frame_text(fragment.data))
 
 
-def test_send_message_with_aprs_id_uses_commit_ack_without_stored_frame() -> None:
-    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+def test_opted_in_send_uses_commit_ack_without_stored_frame(tmp_path) -> None:
+    adapter = APRSAdapter(
+        _core_with_store(tmp_path), config=AdapterConfig(min_interval=0)
+    )
     peer = "EA3GNU"
     request = encode_frame(SendMessage(1_788_097_704, "EA3EFG", "message A"))
     parts = fragment_frame(request, "S0A")
-    ids = [f"{index:02d}" for index in range(len(parts))]
+    ids = [f"C{index:02d}" for index in range(len(parts))]
 
     assert _deliver(adapter, peer, request, "S0A", now=0, message_ids=ids) == "completed"
 
@@ -58,13 +67,14 @@ def test_send_message_with_aprs_id_uses_commit_ack_without_stored_frame() -> Non
     assert adapter.pending_count == 0
 
 
-def test_replayed_send_message_gets_new_commit_ack_without_reexecution_response() -> None:
-    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+def test_replayed_opted_in_send_gets_commit_ack_without_reexecution(tmp_path) -> None:
+    core = _core_with_store(tmp_path)
+    adapter = APRSAdapter(core, config=AdapterConfig(min_interval=0))
     peer = "EA3GNU"
     request = encode_frame(SendMessage(1_788_097_704, "EA3EFG", "message A"))
     parts = fragment_frame(request, "S0A")
-    first_ids = [f"{index:02d}" for index in range(len(parts))]
-    replay_ids = [f"R{index}" for index in range(len(parts))]
+    first_ids = [f"C{index:02d}" for index in range(len(parts))]
+    replay_ids = [f"CR{index}" for index in range(len(parts))]
 
     assert _deliver(adapter, peer, request, "S0A", now=0, message_ids=first_ids) == "completed"
     assert [packet.body for packet in adapter.poll(now=1)] == [
@@ -79,16 +89,47 @@ def test_replayed_send_message_gets_new_commit_ack_without_reexecution_response(
     assert adapter.pending_count == 0
 
 
-def test_send_without_aprs_message_id_keeps_legacy_stored_response() -> None:
+def test_opted_in_send_failure_returns_rej_without_error_frame() -> None:
     adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    peer = "EA3GNU"
+    request = encode_frame(SendMessage(1_788_097_704, "EA3EFG", "no store"))
+    parts = fragment_frame(request, "BAD")
+    ids = [f"C{index:02d}" for index in range(len(parts))]
+
+    assert _deliver(adapter, peer, request, "BAD", now=0, message_ids=ids) == "completed"
+    assert [packet.body for packet in adapter.poll(now=1)] == [f"rej{ids[-1]}"]
+    assert adapter.queued_count == 0
+
+
+def test_legacy_send_with_normal_aprs_id_keeps_ack_and_stored(tmp_path) -> None:
+    adapter = APRSAdapter(
+        _core_with_store(tmp_path), config=AdapterConfig(min_interval=0)
+    )
+    peer = "EA3GNU"
+    request = encode_frame(SendMessage(1_788_097_704, "EA3EFG", "legacy"))
+    parts = fragment_frame(request, "LEG")
+    ids = [f"L{index}" for index in range(len(parts))]
+
+    assert _deliver(adapter, peer, request, "LEG", now=0, message_ids=ids) == "completed"
+    response = adapter.poll(now=1)
+    assert response[0].body == f"ack{ids[-1]}"
+    stored_packets = [packet for packet in response if not packet.is_ack]
+    assert len(stored_packets) == 1
+    assert isinstance(_decode_packet_body(stored_packets[0].body), Stored)
+
+
+def test_send_without_aprs_message_id_keeps_legacy_stored_response(tmp_path) -> None:
+    adapter = APRSAdapter(
+        _core_with_store(tmp_path), config=AdapterConfig(min_interval=0)
+    )
     peer = "EA3GNU"
 
     assert (
         _deliver(
             adapter,
             peer,
-            encode_frame(SendMessage(1_788_097_704, "EA3EFG", "legacy")),
-            "LEG",
+            encode_frame(SendMessage(1_788_097_704, "EA3EFG", "legacy no id")),
+            "LG2",
             now=0,
         )
         == "completed"
@@ -98,9 +139,9 @@ def test_send_without_aprs_message_id_keeps_legacy_stored_response() -> None:
     assert isinstance(_decode_packet_body(response[0].body), Stored)
 
 
-def test_new_request_supersedes_unacked_older_replaceable_response() -> None:
+def test_new_commit_send_supersedes_unacked_older_replaceable_response(tmp_path) -> None:
     adapter = APRSAdapter(
-        ServerCore(),
+        _core_with_store(tmp_path),
         config=AdapterConfig(min_interval=0, ack_timeout=31, max_attempts=5),
     )
     peer = "EA3GNU"
@@ -120,17 +161,18 @@ def test_new_request_supersedes_unacked_older_replaceable_response() -> None:
     assert adapter.pending_count == 1
 
     request = encode_frame(SendMessage(1_788_097_704, "EA3EFG", "test 5"))
-    ids = [f"N{index}" for index in range(len(fragment_frame(request, "NEW")))]
+    ids = [f"C{index:02d}" for index in range(len(fragment_frame(request, "NEW")))]
     assert _deliver(adapter, peer, request, "NEW", now=1, message_ids=ids) == "completed"
 
-    # The old replaceable capabilities response is discarded and SEND_MESSAGE
-    # needs only its commit ACK(s), with no STORED response queued behind it.
+    # The old replaceable capabilities response is discarded. The new
+    # SEND_MESSAGE only needs its commit ACK(s), with no STORED response queued.
     assert adapter.pending_count == 0
     assert adapter.queued_count == 0
-    assert [packet.body for packet in adapter.poll(now=2)] == [
+    confirmations = adapter.poll(now=2)
+    assert [packet.body for packet in confirmations] == [
         f"ack{value}" for value in ids
     ]
-    assert old_response[0].body not in {packet.body for packet in adapter.poll(now=3)}
+    assert old_response[0].body not in {packet.body for packet in confirmations}
 
 
 def test_new_request_does_not_supersede_proactive_delivery() -> None:
