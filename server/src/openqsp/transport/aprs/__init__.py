@@ -1,6 +1,7 @@
 """APRS profile v0.1 transport adapter."""
 
-from .adapter import AdapterConfig, APRSAdapter, OutboundPacket
+from .adapter import AdapterConfig, OutboundPacket
+from .commit_adapter import APRSAdapter
 from .carriage import (
     APRSFragment,
     CarriageError,
