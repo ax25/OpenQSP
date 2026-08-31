@@ -91,7 +91,7 @@ The initial protocol supports:
 - `GET_BULLETIN`;
 - typed `MESSAGE` and bulletin responses, `STORED` for durable successful storage, `END` for completed retrievals, and `ERROR` for failures.
 
-Features such as conversations, groups, attachments, read receipts, synchronized read state and federation are intentionally outside the v0.1 core.
+The Internet API also exposes conversation-oriented state used by the current application, including unread counts, delivery state and explicit read state.
 
 ---
 
@@ -112,19 +112,26 @@ Features such as conversations, groups, attachments, read receipts, synchronized
 
 Transport adapters carry complete OpenQSP Core operations without redefining object semantics, persistence rules or synchronization behaviour.
 
-The protocol codec is intentionally independent from sockets, APRS, WebSocket and database code so that the same Core frames can be reused across different transports.
+The protocol codec is intentionally independent from HTTP, WebSocket, APRS, database and application code so that the same Core semantics can be reused across different transports.
 
 ---
 
-# Repository Structure
+# Repositories
+
+OpenQSP is currently split into two repositories:
+
+- **`OpenQSP`** — server, Core protocol implementation, storage, Internet API, APRS transport and development tools.
+- **`OpenQSP-App`** — the user-facing Flutter application.
+
+This repository contains the server side:
 
 ```text
 OpenQSP/
 │
-├── app/          Future user-facing client
 ├── server/       Server and OpenQSP Core implementation
 ├── protocol/     Protocol-related documentation
 ├── design/       Architecture, protocol, storage and roadmap specifications
+├── docs/         Internet API and implementation documentation
 ├── examples/     Example implementations and fixtures
 └── tools/        Development and protocol laboratory tools
 ```
@@ -135,49 +142,78 @@ The detailed implementation roadmap is maintained in [`design/05-roadmap.md`](de
 
 # Current Status
 
-✅ **Milestone 7 complete — OpenQSP Core v0.1 with TCP and APRS-IS transport paths**
+OpenQSP is now beyond the original server-only prototype stage. The Core server, Internet messaging path, APRS path and the first real user application are all under active development and have been exercised together.
 
-The design baseline and Milestones 1 through 7 are complete. The version 0.1 node supports local Core execution, authenticated TCP Internet access, and the APRS transport profile over APRS-IS.
+## Server
 
-Currently implemented:
+Currently implemented in this repository:
 
-- transport-independent protocol package and typed models;
-- OpenQSP Core frame encoder and decoder;
-- version 0.1 request and response payload codecs;
-- protocol validation and deterministic error handling;
-- automated protocol conformance tests against canonical binary examples;
-- `tools/frame_tool.py` for inspecting, validating and generating Core frames using the production codec;
-- persistent SQLite storage and the minimum `ServerCore`;
-- maintained multi-user, synchronization, restart and bulletin scenarios;
-- a TCP server and remote client transport supporting all four v0.1 client operations through production codec, Core, and storage paths;
-- persistent mailbox and bulletin state, cursors, and sequence allocation across TCP reconnects and full node restarts;
-- APRS Base64url carriage, bounded fragmentation/reassembly, native ACK/retry, replay/deduplication, rate/activity state and proactive private-message delivery;
-- deterministic APRS simulation with fault injection;
-- production APRS-IS connection/reconnection path with verified login and cross-server validation.
+- transport-independent OpenQSP Core protocol models and codecs;
+- persistent SQLite storage for private messages and bulletins;
+- normalized callsign accounts and password-authenticated Internet sessions;
+- HTTPS REST API for authentication, server status, message send/sync and conversation state;
+- WebSocket realtime events for new messages, delivery updates and read updates;
+- per-conversation unread state and explicit read cursors;
+- persisted message delivery state (`stored`, `delivered`, `read`);
+- authoritative per-user active transport selection between Internet/WebSocket and APRS;
+- proactive delivery over the currently active transport, without automatic fallback to a stale transport;
+- APRS Base64url carriage, fragmentation/reassembly, APRS ACK/retry, replay protection and deduplication;
+- APRS incremental mailbox synchronization and proactive message delivery;
+- APRS-IS production connection, verified login, reconnect/backoff, stale-link detection and diagnostic decoded logging;
+- deterministic APRS simulation and extensive automated test coverage.
 
-Normal TCP access uses persistent callsign accounts and password authentication. APRS identity is transport-asserted, not cryptographically authenticated, and account passwords are never sent over APRS.
+The production deployment is intended to expose the server through **HTTPS/WSS**, with APRS-IS as an outbound server connection. The old native TCP development transport is no longer the intended application transport and is not part of the current client architecture.
 
-M7 live acceptance was completed on 2026-08-09. Real APRS-IS tests covered verified node login, capability discovery, seven-fragment message storage, durable retrieval after node restart, unsolicited proactive delivery, forced TCP disconnect with automatic APRS-IS reconnection, and deliberate cross-server exchanges between distinct Tier-2 servers. See [`design/M7-live-aprsis-acceptance.md`](design/M7-live-aprsis-acceptance.md). RF/IGate field validation remains a later field activity and does not block M7 completion.
+## User application
 
-The next active milestone is M8, the first user-facing application.
+The user application is no longer a future milestone. A separate Flutter client exists in [`OpenQSP-App`](https://github.com/ax25/OpenQSP-App) and already implements the main private-messaging experience.
+
+Current application capabilities include:
+
+- Flutter multiplatform application architecture;
+- callsign/password authentication against the Internet API;
+- conversation list and private-message UI;
+- realtime Internet messaging over WebSocket;
+- unread conversation indicators;
+- stored / delivered / read message status in the UI;
+- persistent local message history independent of the active transport;
+- incremental synchronization when reconnecting;
+- Android Bluetooth Classic/SPP TNC configuration;
+- KISS/APRS client transport work, including real APRS message synchronization and sends;
+- APRS server reachability checks, retry/late-response handling and connection diagnostics.
+
+The application currently focuses on **private messages**. Bulletin UI and additional transports remain future work.
+
+## APRS field status
+
+The APRS transport has been tested through APRS-IS and with real RF/IGate paths during client/server development. The current work is focused on robustness on slow and lossy links, minimizing unnecessary RF traffic and ensuring interrupted synchronizations resume safely.
+
+Recent server-side APRS improvements include fail-fast response batches after fragment loss, stale-response supersession, hardened APRS-IS reconnect behavior and human-readable decoded protocol logging.
 
 ---
 
 # Roadmap
+
+The original milestone sequence remains useful as historical design context, but the project has already progressed beyond the old M8 placeholder.
 
 - [x] **Milestone 0 — Design baseline**
 - [x] **Milestone 1 — Protocol codec**
 - [x] **Milestone 2 — Persistent object store**
 - [x] **Milestone 3 — Minimum server core**
 - [x] **Milestone 4 — Multi-user scenarios and end-to-end tests**
-- [x] **Milestone 5 — Internet transport**
+- [x] **Milestone 5 — Internet transport foundation**
 - [x] **Milestone 6 — Production identity, sessions and node capabilities**
 - [x] **Milestone 7 — APRS transport profile and simulator**
-- [ ] **Milestone 8 — User application** *(next)*
+- [x] **Milestone 8 — First user application** — implemented as a separate Flutter repository
 
-The first minimum server release is defined by completion of Milestones 1 through 4.
+Current development is centered on turning those foundations into a usable end-to-end system:
 
-Later extensions may include additional transports, richer user interaction models, attachments, cryptographic identity and node federation, but these are not part of the minimum v0.1 implementation.
+- hardening Internet and APRS transport switching;
+- improving APRS behavior over real lossy RF paths;
+- completing Android TNC/KISS/APRS integration;
+- maintaining durable local/client synchronization semantics;
+- extending the application beyond private messages;
+- evaluating additional low-bandwidth transports such as Packet, LoRa and VARA.
 
 ---
 
@@ -200,33 +236,36 @@ tools/aprs_sim.py
 - encode supported v0.1 operations from human-readable arguments;
 - produce canonical hexadecimal output suitable for comparison with the protocol specification and automated tests.
 
-`client_sim.py` runs the same production-encoded v0.1 operations against either a local Core or the development TCP server. Maintained scenarios under `tools/scenarios/` exercise multi-user, synchronization, persistence, and restart workflows through either environment.
+`client_sim.py` and the remaining development transport tooling are useful for protocol and Core testing, but the current user-facing Internet application uses the HTTPS REST API and WebSocket interface rather than the original native TCP client path.
 
-## Reference TCP client
+## Running the server for development
 
-Install the server package in editable mode, then run a node and two interactive clients in separate terminals:
+Install the server package in editable mode and start a node:
 
 ```console
 $ python -m pip install -e server
 $ openqsp-server --database /tmp/openqsp.db
 ```
 
-In another terminal:
+Provision an account with:
 
 ```console
-$ openqsp-client --host 127.0.0.1 --port 8000 --callsign EA3AAA
+$ openqsp-server --database /tmp/openqsp.db --create-account EA3AAA 'password'
 ```
 
-And another:
+The Flutter application can then be configured to use the server's Internet API. In production, HTTPS/WSS should normally be terminated by a reverse proxy in front of the OpenQSP server.
 
-```console
-$ openqsp-client --host 127.0.0.1 --port 8000 --callsign EA3BBB
-```
+---
 
-The reference client uses production callsign-and-password authentication and exposes capability discovery and unsolicited events.
+# Identity and transport policy
 
-## Production identity and offline policy (M6)
+The node uses persistent normalized base-callsign identities. Password authentication applies to Internet sessions; APRS source identity is transport-asserted and account passwords are never transmitted over APRS.
 
-The node now uses persistent normalized callsign accounts and password authentication, transport-independent active sessions, best-effort unsolicited private-message delivery, and capability discovery. Provision an account with `openqsp-server --database openqsp.db --create-account EA3AAA 'password'`; connect with `openqsp-client --callsign EA3AAA` and enter the password securely.
+For the current MVP, the server maintains one authoritative active transport per user:
 
-A previously configured future client must be able to open without Internet and inspect locally cached state. Node operations remain pending or unavailable until connectivity and server authentication return. Local application access is not server authentication. No credential/token cache semantics are implied; any future cache requires an explicit security design. APRS source identity is transport-asserted and intentionally separate from password-authenticated Internet sessions. Reconnection and transport changes resolve to the same persistent base-callsign mailbox identity.
+- valid OpenQSP traffic received through APRS can establish APRS as the active path;
+- an active authenticated WebSocket session establishes Internet as the active path;
+- proactive messages are sent through the currently active path;
+- the server does not automatically duplicate or fall back to another stale transport.
+
+This keeps transport selection implicit in real client activity while preserving one logical mailbox identity across Internet and radio links.
