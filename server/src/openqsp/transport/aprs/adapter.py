@@ -61,7 +61,7 @@ class AdapterConfig:
             or self.activity_timeout <= 0
         ):
             raise ValueError("timeouts and attempts must be positive")
-        if self.min_interval < 0 or self.config.queue_capacity <= 0:
+        if self.min_interval < 0 or self.queue_capacity <= 0:
             raise ValueError("rate interval must be non-negative and queue bounded")
         if not 1 <= self.transaction_id_space <= 36**3:
             raise ValueError("transaction ID space must be between 1 and 46656")
