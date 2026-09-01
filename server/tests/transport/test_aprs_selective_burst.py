@@ -66,6 +66,37 @@ def test_missing_control_retransmits_only_requested_fragments() -> None:
     assert repaired.index == missing_index
 
 
+def test_selective_repair_does_not_fall_back_to_full_burst_on_timeout() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(),
+        config=AdapterConfig(ack_timeout=31, max_attempts=4, min_interval=0),
+    )
+    frame = bytes(range(160))
+    transaction = adapter.queue_frame("EA3AAA", frame)
+    first = adapter.poll(now=0)
+    assert len(first) > 1
+
+    assert adapter.receive("EA3AAA", encode_missing(transaction, {0}), now=1) == (
+        "repair-requested"
+    )
+    repair = adapter.poll(now=1)
+    assert len(repair) == 1
+    assert parse_fragment(repair[0].body).index == 0
+
+    # Reproduce the live failure: once the peer has explicitly said that only
+    # fragment 0 is missing, expiry of the normal ACK timeout must not resend
+    # the entire transaction.  The receiver will send another Q1N if repair is
+    # still required.
+    assert adapter.poll(now=32) == []
+
+    assert adapter.receive("EA3AAA", encode_missing(transaction, {0}), now=33) == (
+        "repair-requested"
+    )
+    second_repair = adapter.poll(now=33)
+    assert len(second_repair) == 1
+    assert parse_fragment(second_repair[0].body).index == 0
+
+
 def test_incomplete_inbound_burst_emits_one_missing_mask_not_fragment_acks() -> None:
     adapter = SelectiveBurstAPRSAdapter(
         ServerCore(), config=AdapterConfig(min_interval=0), repair_grace=1
