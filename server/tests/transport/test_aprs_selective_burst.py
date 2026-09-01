@@ -155,3 +155,26 @@ def test_final_fragment_shortens_missing_repair_grace_to_two_seconds() -> None:
 
     assert len(control) == 1
     assert control[0].body == "Q1N:ABC:0006"
+
+
+def test_final_fragment_keeps_short_grace_after_late_fragment() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(), config=AdapterConfig(min_interval=0)
+    )
+    frame = encode_frame(GetCapabilities())
+    original = fragment_frame(frame, "ABC")[0]
+    first = type(original)("ABC", 0, 4, original.data, None)
+    second = type(original)("ABC", 1, 4, original.data, None)
+    final = type(original)("ABC", 3, 4, original.data, None)
+
+    assert adapter.receive("EA3AAA", first.body, now=0) == "fragment"
+    assert adapter.receive("EA3AAA", final.body, now=1) == "fragment"
+    assert adapter.receive("EA3AAA", second.body, now=1.5) == "fragment"
+
+    # Once N/N has been seen, later fragments cannot put the transaction back
+    # into the initial five-second burst window.
+    assert adapter.poll(now=3.49) == []
+    control = adapter.poll(now=3.5)
+
+    assert len(control) == 1
+    assert control[0].body == "Q1N:ABC:0004"
