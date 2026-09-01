@@ -91,7 +91,7 @@ class _RxProgress:
 class APRSAdapter(_CommitAPRSAdapter):
     """APRS adapter using transaction ACK/NACK rather than fragment ACKs."""
 
-    def __init__(self, *args, repair_grace: float = 2.0, **kwargs) -> None:
+    def __init__(self, *args, repair_grace: float = 5.0, **kwargs) -> None:
         if repair_grace <= 0:
             raise ValueError("repair_grace must be positive")
         super().__init__(*args, **kwargs)
@@ -252,8 +252,11 @@ class APRSAdapter(_CommitAPRSAdapter):
         now = self.clock() if now is None else now
         packets, self._immediate = self._immediate, []
 
-        # Request repair only after a short quiet period.  No control traffic is
-        # generated when the complete inbound transaction arrived successfully.
+        # Request repair only after a quiet period.  The deadline is refreshed
+        # by every received fragment, so a transmitter that is still sending a
+        # burst gets at least repair_grace seconds of silence before any Q1N.
+        # No control traffic is generated when the complete inbound transaction
+        # arrived successfully.
         for (peer, transaction_id), progress in tuple(self._rx_progress.items()):
             if now < progress.deadline:
                 continue
