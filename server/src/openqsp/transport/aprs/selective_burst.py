@@ -74,6 +74,7 @@ class _BurstTx:
     attempts: int = 0
     deadline: float = 0.0
     requested: frozenset[int] | None = None
+    repair_active: bool = False
 
 
 @dataclass
@@ -226,6 +227,7 @@ class APRSAdapter(_CommitAPRSAdapter):
             if not valid_missing:
                 return "ignored"
             tx.requested = valid_missing
+            tx.repair_active = True
             return "repair-requested"
 
         try:
@@ -269,13 +271,15 @@ class APRSAdapter(_CommitAPRSAdapter):
             progress.deadline = now + self.repair_grace
 
         # Explicit Q1N repairs take priority.  A silent/lost transaction control
-        # falls back to a whole-burst retry after ack_timeout.
+        # falls back to a whole-burst retry after ack_timeout only until the peer
+        # has entered selective repair.  Once a Q1N has been received, further
+        # repair is driven exclusively by subsequent Q1N masks.
         for peer, tx in tuple(self._burst_active.items()):
             indices: tuple[int, ...] | None = None
             if tx.requested is not None:
                 indices = tuple(sorted(tx.requested))
                 tx.requested = None
-            elif tx.deadline and now >= tx.deadline:
+            elif tx.deadline and now >= tx.deadline and not tx.repair_active:
                 indices = tuple(range(len(tx.fragments)))
             if indices is None:
                 continue
