@@ -3,8 +3,8 @@ from __future__ import annotations
 from openqsp.protocol import GetCapabilities, encode_frame
 from openqsp.server import ServerCore
 from openqsp.transport.aprs import (
-    APRSAdapter,
     AdapterConfig,
+    SelectiveBurstAPRSAdapter,
     encode_burst_ack,
     encode_missing,
     parse_burst_control,
@@ -28,7 +28,9 @@ def test_burst_control_round_trip() -> None:
 
 
 def test_complete_outbound_transaction_needs_one_transaction_ack() -> None:
-    adapter = APRSAdapter(ServerCore(), config=AdapterConfig(min_interval=0))
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(), config=AdapterConfig(min_interval=0)
+    )
     transaction = adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities()))
 
     burst = adapter.poll(now=0)
@@ -41,14 +43,10 @@ def test_complete_outbound_transaction_needs_one_transaction_ack() -> None:
 
 
 def test_missing_control_retransmits_only_requested_fragments() -> None:
-    adapter = APRSAdapter(
+    adapter = SelectiveBurstAPRSAdapter(
         ServerCore(),
         config=AdapterConfig(ack_timeout=31, max_attempts=3, min_interval=0),
     )
-    # A long ERROR-free Core frame is not needed: multiple copies of a valid
-    # frame can be fragmented by reducing carriage chunk size only in protocol
-    # code, so use a real response and assert against however many fragments it
-    # naturally produces.  If it is one fragment, request that one fragment.
     transaction = adapter.queue_frame("EA3AAA", encode_frame(GetCapabilities()))
     first = adapter.poll(now=0)
     fragments = [parse_fragment(packet.body) for packet in first]
@@ -69,13 +67,11 @@ def test_missing_control_retransmits_only_requested_fragments() -> None:
 
 
 def test_incomplete_inbound_burst_emits_one_missing_mask_not_fragment_acks() -> None:
-    adapter = APRSAdapter(
+    adapter = SelectiveBurstAPRSAdapter(
         ServerCore(), config=AdapterConfig(min_interval=0), repair_grace=1
     )
     frame = encode_frame(GetCapabilities())
     original = fragment_frame(frame, "ABC")[0]
-    # Build a syntactically valid two-fragment transaction whose first part is
-    # observed.  Reassembly cannot complete, therefore a single Q1N is emitted.
     first = type(original)("ABC", 0, 2, original.data, None)
 
     assert adapter.receive("EA3AAA", first.body, now=0) == "fragment"
