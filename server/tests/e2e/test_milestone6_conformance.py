@@ -106,6 +106,10 @@ def test_production_two_user_push_capabilities_restart(tmp_path):
             await asyncio.to_thread(sender.close)
             await asyncio.to_thread(recipient.close)
             await asyncio.to_thread(second_recipient.close)
+            for _ in range(50):
+                if server.sessions.active_count == 0:
+                    break
+                await asyncio.sleep(0.01)
             assert server.sessions.active_count == 0
 
         # Full node reconstruction proves both credential and mailbox persistence.
