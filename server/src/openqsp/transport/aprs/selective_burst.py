@@ -82,6 +82,7 @@ class _RxProgress:
     total: int
     received: set[int] = field(default_factory=set)
     deadline: float = 0.0
+    saw_final: bool = False
 
     @property
     def missing(self) -> set[int]:
@@ -91,11 +92,20 @@ class _RxProgress:
 class APRSAdapter(_CommitAPRSAdapter):
     """APRS adapter using transaction ACK/NACK rather than fragment ACKs."""
 
-    def __init__(self, *args, repair_grace: float = 5.0, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        repair_grace: float = 5.0,
+        final_fragment_grace: float = 2.0,
+        **kwargs,
+    ) -> None:
         if repair_grace <= 0:
             raise ValueError("repair_grace must be positive")
+        if final_fragment_grace <= 0:
+            raise ValueError("final_fragment_grace must be positive")
         super().__init__(*args, **kwargs)
         self.repair_grace = repair_grace
+        self.final_fragment_grace = final_fragment_grace
         self._burst_queue: list[_BurstTx] = []
         self._burst_active: dict[str, _BurstTx] = {}
         self._rx_progress: dict[tuple[str, str], _RxProgress] = {}
@@ -241,7 +251,10 @@ class APRSAdapter(_CommitAPRSAdapter):
             progress = _RxProgress(fragment.total)
             self._rx_progress[key] = progress
         progress.received.add(fragment.index)
-        progress.deadline = now + self.repair_grace
+        if fragment.index == fragment.total - 1:
+            progress.saw_final = True
+        grace = self.final_fragment_grace if progress.saw_final else self.repair_grace
+        progress.deadline = now + min(grace, self.repair_grace)
 
         disposition = super().receive(peer, body, now=now)
         if disposition in {"completed", "replayed", "invalid", "conflict"}:
@@ -252,11 +265,10 @@ class APRSAdapter(_CommitAPRSAdapter):
         now = self.clock() if now is None else now
         packets, self._immediate = self._immediate, []
 
-        # Request repair only after a quiet period.  The deadline is refreshed
-        # by every received fragment, so a transmitter that is still sending a
-        # burst gets at least repair_grace seconds of silence before any Q1N.
-        # No control traffic is generated when the complete inbound transaction
-        # arrived successfully.
+        # Before the final fragment is observed, request repair only after the
+        # normal quiet period, refreshed by every fragment.  Seeing the final
+        # fragment proves the initial burst has ended, so remaining holes can be
+        # requested after the shorter final-fragment grace period.
         for (peer, transaction_id), progress in tuple(self._rx_progress.items()):
             if now < progress.deadline:
                 continue
@@ -271,7 +283,8 @@ class APRSAdapter(_CommitAPRSAdapter):
                     encode_missing(transaction_id, missing),
                 )
             )
-            progress.deadline = now + self.repair_grace
+            grace = self.final_fragment_grace if progress.saw_final else self.repair_grace
+            progress.deadline = now + min(grace, self.repair_grace)
 
         # Explicit Q1N repairs take priority.  A silent/lost transaction control
         # falls back to a whole-burst retry after ack_timeout only until the peer
