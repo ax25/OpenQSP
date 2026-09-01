@@ -81,3 +81,61 @@ def test_incomplete_inbound_burst_emits_one_missing_mask_not_fragment_acks() -> 
     assert len(control) == 1
     assert control[0].body == "Q1N:ABC:0002"
     assert not control[0].body.startswith("ack")
+
+
+def test_proactive_transaction_supersedes_unacked_replaceable_response() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(),
+        config=AdapterConfig(ack_timeout=31, max_attempts=5, min_interval=2),
+    )
+    stale = adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        response_batch=("EA3AAA", "REQ"),
+        response_supersedable=True,
+    )
+    first = adapter.poll(now=0)
+    assert first
+    assert adapter.pending_count == len(first)
+
+    proactive = adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        proactive=True,
+    )
+
+    # The stale response is no longer active, but the normal APRS pacing still
+    # applies.  We do not wait for its 31-second ACK timeout.
+    assert adapter.receive("EA3AAA", encode_burst_ack(stale), now=1) == "ignored"
+    assert adapter.poll(now=1) == []
+    second = adapter.poll(now=2)
+
+    assert second
+    assert {
+        parse_fragment(packet.body).transaction_id for packet in second
+    } == {proactive}
+
+
+def test_proactive_transaction_does_not_supersede_nonreplaceable_response() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(),
+        config=AdapterConfig(ack_timeout=31, max_attempts=5, min_interval=2),
+    )
+    protected = adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        response_batch=("EA3AAA", "SEND"),
+        response_supersedable=False,
+    )
+    first = adapter.poll(now=0)
+    assert first
+
+    adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        proactive=True,
+    )
+
+    assert adapter.poll(now=2) == []
+    assert adapter.receive("EA3AAA", encode_burst_ack(protected), now=2) == "acknowledged"
+    assert adapter.poll(now=2)
