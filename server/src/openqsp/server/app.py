@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from openqsp.storage import AccountStore, BulletinStore, Database, MessageStore
-from openqsp.transport.aprs import APRSAdapter
+from openqsp.transport.aprs import SelectiveBurstAPRSAdapter as APRSAdapter
 from openqsp.transport.aprs.aprsis import APRSISClient, APRSISConfig
 
 from .config import ConfigurationError, ServerConfig, load_dotenv
