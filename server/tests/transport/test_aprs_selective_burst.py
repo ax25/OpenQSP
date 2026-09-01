@@ -112,3 +112,25 @@ def test_incomplete_inbound_burst_emits_one_missing_mask_not_fragment_acks() -> 
     assert len(control) == 1
     assert control[0].body == "Q1N:ABC:0002"
     assert not control[0].body.startswith("ack")
+
+
+def test_default_repair_grace_waits_five_seconds_after_latest_fragment() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(), config=AdapterConfig(min_interval=0)
+    )
+    frame = encode_frame(GetCapabilities())
+    original = fragment_frame(frame, "ABC")[0]
+    first = type(original)("ABC", 0, 3, original.data, None)
+    third = type(original)("ABC", 2, 3, original.data, None)
+
+    assert adapter.receive("EA3AAA", first.body, now=0) == "fragment"
+    assert adapter.poll(now=4.99) == []
+
+    # More of the same burst can still arrive while the transmitter is active.
+    # Receiving it restarts the quiet-period timer.
+    assert adapter.receive("EA3AAA", third.body, now=4.99) == "fragment"
+    assert adapter.poll(now=9.98) == []
+
+    control = adapter.poll(now=9.99)
+    assert len(control) == 1
+    assert control[0].body == "Q1N:ABC:0002"
