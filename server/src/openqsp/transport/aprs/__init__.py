@@ -14,13 +14,13 @@ from .carriage import (
 )
 from .commit_adapter import APRSAdapter
 from .selective_burst import (
-    APRSAdapter as SelectiveBurstAPRSAdapter,
     encode_burst_ack,
     encode_missing,
     encode_stored,
     parse_burst_control,
     parse_stored,
 )
+from .selective_burst_guarded import APRSAdapter as SelectiveBurstAPRSAdapter
 
 __all__ = [
     "APRSAdapter",
