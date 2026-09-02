@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from openqsp.protocol import End, GetNewMessages, Message, Operation, encode_frame
-from openqsp.transport.aprs.carriage import APRSFragment, fragment_frame
+from openqsp.protocol import End, GetCapabilities, GetNewMessages, Message, Operation, encode_frame
+from openqsp.transport.aprs.carriage import APRSFragment, fragment_frame, fragment_frame_v2
 from openqsp.transport.aprs.diagnostics import APRSFrameDiagnostics
+from openqsp.transport.aprs.selective_burst import encode_burst_ack, encode_missing, encode_stored
 
 
 def _with_message_id(fragment: APRSFragment, message_id: str) -> str:
@@ -24,6 +25,31 @@ def test_single_fragment_request_is_logged_with_cursor_and_max() -> None:
     assert description is not None
     assert "Q1 transaction=WFH fragment=1/1" in description
     assert "GET_NEW_MESSAGES since=10 max=20" in description
+
+
+def test_q2_single_fragment_is_logged_semantically_without_base91_payload() -> None:
+    diagnostics = APRSFrameDiagnostics()
+    fragment = fragment_frame_v2(encode_frame(GetCapabilities()), "003")[0]
+
+    description = diagnostics.describe_received("EA3GNU", fragment.body)
+
+    assert description is not None
+    assert "Q2 transaction=003 fragment=1/1" in description
+    assert "GET_CAPABILITIES" in description
+    assert fragment.body not in description
+
+
+def test_q2_controls_are_human_readable() -> None:
+    diagnostics = APRSFrameDiagnostics()
+
+    assert diagnostics.describe_received("EA3GNU", encode_burst_ack("003")) == (
+        "A2 transaction=003 ACK"
+    )
+    assert diagnostics.describe_sent("EA3GNU", encode_stored("003")) == (
+        "S2 transaction=003 STORED"
+    )
+    nack = diagnostics.describe_received("EA3GNU", encode_missing("003", {1, 4}))
+    assert nack == "N2 transaction=003 missing=2,5 mask=0x0012"
 
 
 def test_multifragment_message_is_described_when_complete() -> None:

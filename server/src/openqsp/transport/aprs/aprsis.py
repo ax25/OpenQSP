@@ -230,22 +230,27 @@ class APRSISClient:
                         if addressee == self.config.callsign.upper():
                             if igate is not None:
                                 self._last_igate[self._base_callsign(source)] = igate
-                            logger.info(
-                                "APRS packet received: from=%s to=%s igate=%s body=%r",
-                                source,
-                                addressee,
-                                igate or self.last_igate_for(source) or "-",
-                                body,
-                            )
+                            resolved_igate = igate or self.last_igate_for(source) or "-"
                             description = self._diagnostics.describe_received(
                                 source, body
                             )
                             if description is not None:
                                 logger.info(
-                                    "%s  decoded: %s%s",
+                                    "%sAPRS OpenQSP received: from=%s to=%s igate=%s | %s%s",
                                     _YELLOW,
+                                    source,
+                                    addressee,
+                                    resolved_igate,
                                     description,
                                     _RESET,
+                                )
+                            else:
+                                logger.info(
+                                    "APRS packet received: from=%s to=%s igate=%s body=%r",
+                                    source,
+                                    addressee,
+                                    resolved_igate,
+                                    body,
                                 )
                             try:
                                 self.adapter.receive(source, body)
@@ -263,21 +268,24 @@ class APRSISClient:
                 if verified:
                     for outbound in self.adapter.poll():
                         writer.write((format_packet(outbound) + "\r\n").encode())
-                        logger.info(
-                            "APRS packet sent: from=%s to=%s body=%r",
-                            outbound.source,
-                            outbound.destination,
-                            outbound.body,
-                        )
                         description = self._diagnostics.describe_sent(
                             outbound.destination, outbound.body
                         )
                         if description is not None:
                             logger.info(
-                                "%s  decoded: %s%s",
+                                "%sAPRS OpenQSP sent: from=%s to=%s | %s%s",
                                 _YELLOW,
+                                outbound.source,
+                                outbound.destination,
                                 description,
                                 _RESET,
+                            )
+                        else:
+                            logger.info(
+                                "APRS packet sent: from=%s to=%s body=%r",
+                                outbound.source,
+                                outbound.destination,
+                                outbound.body,
                             )
                     await writer.drain()
 

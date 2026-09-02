@@ -40,7 +40,7 @@ _MESSAGE_ID_RE = re.compile(r"\{([0-9A-Z]{1,5})$")
 
 @dataclass(frozen=True)
 class AdapterConfig:
-    ack_timeout: float = 31.0
+    ack_timeout: float = 15.0
     max_attempts: int = 5
     min_interval: float = 2.0
     activity_timeout: float = 600.0
