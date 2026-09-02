@@ -2,19 +2,17 @@
 
 Q2 carries raw OpenQSP Core bytes using the compact APRS-safe Base91 carriage.
 Positive receipt is transaction-level ``A2``; selective repair is ``N2`` with
-a 16-bit missing-fragment bitmap. Legacy Q1A/Q1N controls remain parseable
-while peers migrate.
-
-Inbound client requests deliberately do not receive A2: their normal OpenQSP
-response is the positive transaction result. In particular SEND_MESSAGE is
-closed by its durable STORED response. N2 is emitted only when the inbound
-burst is incomplete after the repair grace period.
+a 16-bit missing-fragment bitmap. Successful SEND_MESSAGE completion is the
+compact ``S2`` durable result, correlated to the inbound transaction. Legacy
+Q1A/Q1N controls remain parseable while peers migrate.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+
+from openqsp.protocol import SendMessage, Stored, decode_frame
 
 from .adapter import OutboundPacket
 from .carriage import (
@@ -42,6 +40,23 @@ def _transaction_byte(transaction_id: str) -> int:
 
 def encode_burst_ack(transaction_id: str) -> str:
     return "A2" + base91_encode(bytes((_transaction_byte(transaction_id),)))
+
+
+def encode_stored(transaction_id: str) -> str:
+    """Encode durable SEND_MESSAGE completion for an inbound Q2 transaction."""
+    return "S2" + base91_encode(bytes((_transaction_byte(transaction_id),)))
+
+
+def parse_stored(body: str) -> str | None:
+    if not body.startswith("S2"):
+        return None
+    try:
+        payload = base91_decode(body[2:])
+    except CarriageError:
+        return None
+    if len(payload) != 1:
+        return None
+    return base36(payload[0], 3)
 
 
 def encode_missing(transaction_id: str, missing: set[int] | frozenset[int]) -> str:
@@ -81,7 +96,6 @@ def parse_burst_control(body: str) -> tuple[str, str, frozenset[int]] | None:
             frozenset(index for index in range(16) if mask & (1 << index)),
         )
 
-    # Migration compatibility with the textual Q1 burst controls.
     ack = _ACK_RE.fullmatch(body)
     if ack is not None:
         return ("ack", ack.group(1), frozenset())
@@ -265,8 +279,6 @@ class APRSAdapter(_CommitAPRSAdapter):
     def _confirm_inbound(
         self, peer: str, message_id: str | None, *, accepted: bool = True
     ) -> None:
-        # Q2 fragments never carry APRS message IDs. Legacy rejects are kept so
-        # malformed Q1 traffic still receives the old negative signal.
         if accepted:
             return
         super()._confirm_inbound(peer, message_id, accepted=False)
@@ -282,6 +294,31 @@ class APRSAdapter(_CommitAPRSAdapter):
             del self._burst_active[peer]
         self.failed_packets.extend(tx.packets)
         del self.failed_packets[: -self.config.event_history_capacity]
+
+    def _compact_stored_result(self, peer: str, transaction_id: str, now: float) -> None:
+        replay = self.replay.get(peer, transaction_id, now)
+        if replay is None:
+            return
+        if not isinstance(decode_frame(replay.request), SendMessage):
+            return
+        if len(replay.responses) != 1 or not isinstance(
+            decode_frame(replay.responses[0]), Stored
+        ):
+            return
+        response_batch = (peer, transaction_id)
+        self._burst_queue = [
+            tx for tx in self._burst_queue if tx.response_batch != response_batch
+        ]
+        active = self._burst_active.get(peer)
+        if active is not None and active.response_batch == response_batch:
+            del self._burst_active[peer]
+        self._immediate.append(
+            OutboundPacket(
+                self.service_callsign,
+                peer,
+                encode_stored(transaction_id),
+            )
+        )
 
     def receive(self, peer: str, body: str, *, now: float | None = None) -> str:
         now = self.clock() if now is None else now
@@ -325,6 +362,8 @@ class APRSAdapter(_CommitAPRSAdapter):
         progress.deadline = now + min(grace, self.repair_grace)
 
         disposition = super().receive(peer, body, now=now)
+        if disposition in {"completed", "replayed"}:
+            self._compact_stored_result(peer, fragment.transaction_id, now)
         if disposition in {"completed", "replayed", "invalid", "conflict"}:
             self._rx_progress.pop(key, None)
         return disposition
