@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import heapq
+
 from openqsp.protocol import (
     GetBulletin,
     GetCapabilities,
@@ -39,6 +41,46 @@ class APRSAdapter(_BaseAPRSAdapter):
     @staticmethod
     def _send_was_stored(responses: tuple[bytes, ...]) -> bool:
         return len(responses) == 1 and isinstance(decode_frame(responses[0]), Stored)
+
+    def _reconcile_message_cursor(self, peer: str, callsign: str, since: int) -> None:
+        """Treat the client's cursor as proof that older deliveries were received.
+
+        APRS ACK loss must not override a newer GET_NEW_MESSAGES cursor. If the
+        client asks for messages after N, any queued or ACK-pending delivery for
+        that same mailbox at sequence <= N is obsolete and must not be sent
+        again. Recording it as delivered also repairs the stale transport state.
+        """
+        confirmed: set[tuple[str, int]] = set()
+
+        retained = []
+        for item in self._queue:
+            delivery = item.delivery
+            if (
+                item.peer == peer
+                and delivery is not None
+                and delivery[0] == callsign
+                and delivery[1] <= since
+            ):
+                confirmed.add(delivery)
+            else:
+                retained.append(item)
+        if len(retained) != len(self._queue):
+            self._queue = retained
+            heapq.heapify(self._queue)
+
+        for key, pending in tuple(self._pending.items()):
+            delivery = pending.delivery
+            if (
+                key[0] == peer
+                and delivery is not None
+                and delivery[0] == callsign
+                and delivery[1] <= since
+            ):
+                confirmed.add(delivery)
+                del self._pending[key]
+
+        for delivery in confirmed:
+            self.core.mark_aprs_delivered(*delivery)
 
     def receive(self, peer: str, body: str, *, now: float | None = None) -> str:
         now = self.clock() if now is None else now
@@ -153,6 +195,9 @@ class APRSAdapter(_BaseAPRSAdapter):
             self._confirm_inbound(peer, inbound_message_id)
 
         callsign = normalize_callsign(peer, "APRS source")
+        if isinstance(request, GetNewMessages):
+            self._reconcile_message_cursor(peer, callsign, request.since)
+
         responses = tuple(self.core.handle_frame(callsign, frame))
         response_supersedable = not isinstance(request, SendMessage)
         self._activate_aprs_if_accepted(peer, responses)
