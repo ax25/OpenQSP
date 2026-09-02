@@ -9,7 +9,12 @@ from openqsp.transport.aprs import (
     encode_missing,
     parse_burst_control,
 )
-from openqsp.transport.aprs.carriage import APRSFragment, base91_encode, parse_fragment
+from openqsp.transport.aprs.carriage import (
+    APRSFragment,
+    base91_encode,
+    fragment_frame_v2,
+    parse_fragment,
+)
 
 
 def _partial(transaction: str, index: int, total: int, raw: bytes) -> APRSFragment:
@@ -67,6 +72,26 @@ def test_complete_outbound_transaction_needs_one_transaction_ack() -> None:
     assert adapter.pending_count == len(burst)
     assert adapter.receive("EA3AAA", encode_burst_ack(transaction), now=0) == "acknowledged"
     assert adapter.pending_count == 0
+
+
+def test_complete_inbound_q2_transaction_emits_a2_for_same_transaction() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(), config=AdapterConfig(min_interval=0)
+    )
+    transaction = "00A"
+    fragments = fragment_frame_v2(encode_frame(GetCapabilities()), transaction)
+
+    for fragment in fragments[:-1]:
+        assert adapter.receive("EA3AAA", fragment.body, now=0) == "fragment"
+    assert adapter.receive("EA3AAA", fragments[-1].body, now=0) == "completed"
+
+    outbound = adapter.poll(now=0)
+    assert outbound
+    assert parse_burst_control(outbound[0].body) == (
+        "ack",
+        transaction,
+        frozenset(),
+    )
 
 
 def test_missing_control_retransmits_only_requested_fragments() -> None:
