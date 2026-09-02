@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from openqsp.protocol import (
     GetCapabilities,
+    GetNewMessages,
+    Message,
     SendMessage,
     Stored,
     decode_frame,
@@ -196,3 +198,45 @@ def test_new_request_does_not_supersede_proactive_delivery() -> None:
     )
     assert adapter.pending_count == 1
     assert adapter.poll(now=1) == []
+
+
+def test_message_cursor_supersedes_unacked_delivery_it_already_covers(tmp_path) -> None:
+    database = Database(tmp_path / "node.db")
+    database.initialize()
+    store = MessageStore(database)
+    core = ServerCore(message_store=store)
+    adapter = APRSAdapter(
+        core,
+        config=AdapterConfig(min_interval=0, ack_timeout=31, max_attempts=5),
+    )
+    peer = "EA3GNU"
+    sequence = store.store_message(
+        created_at=1_788_097_704,
+        author="EA3EFG",
+        recipient=peer,
+        body="already received despite lost APRS ACK",
+    )
+    message = Message(
+        sequence,
+        1_788_097_704,
+        "EA3EFG",
+        peer,
+        "already received despite lost APRS ACK",
+    )
+
+    assert adapter.deliver_message(message, peer)
+    first_delivery = adapter.poll(now=0)
+    assert len(first_delivery) == 1
+    assert adapter.pending_count == 1
+
+    # The client reconnects after receiving the message but losing its ACK.
+    # Its cursor is stronger evidence than the stale pending transport ACK.
+    request = encode_frame(GetNewMessages(sequence, 20))
+    assert _deliver(adapter, peer, request, "NEW", now=1) == "completed"
+
+    assert adapter.pending_count == 0
+    assert store.message_state(store.get_message(recipient=peer, sequence=sequence))[0] == "delivered"
+
+    response = adapter.poll(now=1)
+    assert len(response) == 1
+    assert first_delivery[0].body not in {packet.body for packet in response}
