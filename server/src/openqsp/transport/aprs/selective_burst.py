@@ -1,13 +1,13 @@
 """Transaction-level APRS burst delivery with selective repair.
 
-OpenQSP reliability is handled per logical transaction instead of with one
-APRS ACK per Q1 fragment.  A receiver acknowledges a complete outbound burst
-with ``Q1A:TTT`` or requests only missing fragments with
-``Q1N:TTT:MMMM`` where MMMM is a 16-bit hexadecimal missing-fragment mask.
+Q2 carries raw OpenQSP Core bytes using the compact APRS-safe Base91 carriage.
+Positive receipt is transaction-level ``A2``; selective repair is ``N2`` with
+a 16-bit missing-fragment bitmap. Legacy Q1A/Q1N controls remain parseable
+while peers migrate.
 
-Inbound client requests deliberately do not receive Q1A: their normal OpenQSP
-response is the positive transaction result.  In particular SEND_MESSAGE is
-closed by its durable STORED response.  Q1N is emitted only when the inbound
+Inbound client requests deliberately do not receive A2: their normal OpenQSP
+response is the positive transaction result. In particular SEND_MESSAGE is
+closed by its durable STORED response. N2 is emitted only when the inbound
 burst is incomplete after the repair grace period.
 """
 
@@ -17,22 +17,34 @@ import re
 from dataclasses import dataclass, field
 
 from .adapter import OutboundPacket
-from .carriage import APRSFragment, CarriageError, fragment_frame, parse_fragment
+from .carriage import (
+    APRSFragment,
+    CarriageError,
+    base36,
+    base91_decode,
+    base91_encode,
+    fragment_frame_v2,
+    parse_base36,
+    parse_fragment,
+)
 from .commit_adapter import APRSAdapter as _CommitAPRSAdapter
 
 _ACK_RE = re.compile(r"Q1A:([0-9A-Z]{3})")
 _NACK_RE = re.compile(r"Q1N:([0-9A-Z]{3}):([0-9A-F]{4})")
 
 
+def _transaction_byte(transaction_id: str) -> int:
+    value = parse_base36(transaction_id, 3)
+    if value > 0xFF:
+        raise CarriageError("Q2 transaction ID must fit in one byte")
+    return value
+
+
 def encode_burst_ack(transaction_id: str) -> str:
-    if re.fullmatch(r"[0-9A-Z]{3}", transaction_id) is None:
-        raise CarriageError("invalid transaction ID")
-    return f"Q1A:{transaction_id}"
+    return "A2" + base91_encode(bytes((_transaction_byte(transaction_id),)))
 
 
 def encode_missing(transaction_id: str, missing: set[int] | frozenset[int]) -> str:
-    if re.fullmatch(r"[0-9A-Z]{3}", transaction_id) is None:
-        raise CarriageError("invalid transaction ID")
     mask = 0
     for index in missing:
         if not 0 <= index < 16:
@@ -40,10 +52,36 @@ def encode_missing(transaction_id: str, missing: set[int] | frozenset[int]) -> s
         mask |= 1 << index
     if mask == 0:
         raise CarriageError("missing-fragment mask must not be empty")
-    return f"Q1N:{transaction_id}:{mask:04X}"
+    payload = bytes((_transaction_byte(transaction_id),)) + mask.to_bytes(2, "big")
+    return "N2" + base91_encode(payload)
 
 
 def parse_burst_control(body: str) -> tuple[str, str, frozenset[int]] | None:
+    if body.startswith("A2"):
+        try:
+            payload = base91_decode(body[2:])
+        except CarriageError:
+            return None
+        if len(payload) != 1:
+            return None
+        return ("ack", base36(payload[0], 3), frozenset())
+    if body.startswith("N2"):
+        try:
+            payload = base91_decode(body[2:])
+        except CarriageError:
+            return None
+        if len(payload) != 3:
+            return None
+        mask = int.from_bytes(payload[1:], "big")
+        if mask == 0:
+            return None
+        return (
+            "missing",
+            base36(payload[0], 3),
+            frozenset(index for index in range(16) if mask & (1 << index)),
+        )
+
+    # Migration compatibility with the textual Q1 burst controls.
     ack = _ACK_RE.fullmatch(body)
     if ack is not None:
         return ("ack", ack.group(1), frozenset())
@@ -90,7 +128,7 @@ class _RxProgress:
 
 
 class APRSAdapter(_CommitAPRSAdapter):
-    """APRS adapter using transaction ACK/NACK rather than fragment ACKs."""
+    """APRS adapter using compact Q2 transaction ACK/NACK reliability."""
 
     def __init__(
         self,
@@ -111,6 +149,18 @@ class APRSAdapter(_CommitAPRSAdapter):
         self._rx_progress: dict[tuple[str, str], _RxProgress] = {}
         self._burst_order = 0
 
+    def _allocate(self, peer: str, *, transaction: bool) -> str:
+        if not transaction:
+            return super()._allocate(peer, transaction=False)
+        active = self._active_transactions(peer)
+        for _ in range(256):
+            value = self._next_transaction[peer] % 256
+            self._next_transaction[peer] = value + 1
+            candidate = base36(value, 3)
+            if candidate not in active:
+                return candidate
+        raise OverflowError("peer Q2 transaction ID space exhausted")
+
     def _active_transactions(self, peer: str) -> set[str]:
         active = super()._active_transactions(peer)
         active.update(
@@ -130,13 +180,6 @@ class APRSAdapter(_CommitAPRSAdapter):
         return sum(len(tx.fragments) for tx in self._burst_active.values())
 
     def _supersede_active_response_for_proactive(self, peer: str) -> None:
-        """Let new proactive traffic replace a stale, replaceable response batch.
-
-        A response such as END(GET_NEW_MESSAGES) can remain active for the full
-        ACK retry window when its Q1A is lost.  That response must not block a
-        newly routed unsolicited message for the same peer.  Non-replaceable
-        responses (notably SEND_MESSAGE/STORED) remain protected.
-        """
         active = self._burst_active.get(peer)
         if (
             active is None
@@ -166,7 +209,7 @@ class APRSAdapter(_CommitAPRSAdapter):
         if proactive:
             self._supersede_active_response_for_proactive(peer)
         transaction_id = self._allocate(peer, transaction=True)
-        fragments = fragment_frame(frame, transaction_id)
+        fragments = fragment_frame_v2(frame, transaction_id)
         current_load = self.queued_count + self.pending_count
         if current_load + len(fragments) > self.config.queue_capacity:
             raise OverflowError("bounded APRS outbound queue is full")
@@ -222,8 +265,8 @@ class APRSAdapter(_CommitAPRSAdapter):
     def _confirm_inbound(
         self, peer: str, message_id: str | None, *, accepted: bool = True
     ) -> None:
-        # Positive fragment ACKs are intentionally suppressed.  A reject for a
-        # legacy/message-ID fragment remains useful to surface malformed input.
+        # Q2 fragments never carry APRS message IDs. Legacy rejects are kept so
+        # malformed Q1 traffic still receives the old negative signal.
         if accepted:
             return
         super()._confirm_inbound(peer, message_id, accepted=False)
@@ -290,10 +333,6 @@ class APRSAdapter(_CommitAPRSAdapter):
         now = self.clock() if now is None else now
         packets, self._immediate = self._immediate, []
 
-        # Before the final fragment is observed, request repair only after the
-        # normal quiet period, refreshed by every fragment.  Seeing the final
-        # fragment proves the initial burst has ended, so remaining holes can be
-        # requested after the shorter final-fragment grace period.
         for (peer, transaction_id), progress in tuple(self._rx_progress.items()):
             if now < progress.deadline:
                 continue
@@ -311,10 +350,6 @@ class APRSAdapter(_CommitAPRSAdapter):
             grace = self.final_fragment_grace if progress.saw_final else self.repair_grace
             progress.deadline = now + min(grace, self.repair_grace)
 
-        # Explicit Q1N repairs take priority.  A silent/lost transaction control
-        # falls back to a whole-burst retry after ack_timeout only until the peer
-        # has entered selective repair.  Once a Q1N has been received, further
-        # repair is driven exclusively by subsequent Q1N masks.
         for peer, tx in tuple(self._burst_active.items()):
             indices: tuple[int, ...] | None = None
             if tx.requested is not None:
@@ -335,8 +370,6 @@ class APRSAdapter(_CommitAPRSAdapter):
             tx.deadline = now + self.config.ack_timeout
             self._last_send[peer] = now
 
-        # One logical transaction in flight per peer, all of its fragments in
-        # the same poll result so APRS-IS/TNC can transmit a contiguous burst.
         candidates = sorted(self._burst_queue, key=lambda tx: (tx.priority, tx.order))
         for tx in candidates:
             if tx.peer in self._burst_active:
