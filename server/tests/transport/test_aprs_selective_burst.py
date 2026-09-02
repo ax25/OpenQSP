@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openqsp.protocol import GetCapabilities, encode_frame
+from openqsp.protocol import GetCapabilities, SendMessage, encode_frame
 from openqsp.server import ServerCore
 from openqsp.transport.aprs import (
     AdapterConfig,
@@ -71,7 +71,13 @@ def test_selective_repair_does_not_fall_back_to_full_burst_on_timeout() -> None:
         ServerCore(),
         config=AdapterConfig(ack_timeout=31, max_attempts=4, min_interval=0),
     )
-    frame = bytes(range(160))
+    frame = encode_frame(
+        SendMessage(
+            created_at=1_700_000_000,
+            recipient="EA3BBB",
+            body="x" * 180,
+        )
+    )
     transaction = adapter.queue_frame("EA3AAA", frame)
     first = adapter.poll(now=0)
     assert len(first) > 1
