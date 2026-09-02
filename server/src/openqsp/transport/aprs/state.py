@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
+from openqsp.protocol import decode_frame_with_flags
+
 from .carriage import APRSFragment, CarriageError, decode_frame_text
 
 
@@ -17,7 +19,8 @@ class _Assembly:
     total: int
     first_seen: float
     last_seen: float
-    parts: dict[int, str] = field(default_factory=dict)
+    version: int
+    parts: dict[int, str | bytes] = field(default_factory=dict)
 
 
 class Reassembler:
@@ -39,21 +42,45 @@ class Reassembler:
         if entry is None:
             while len(self._entries) >= self.max_entries:
                 self._entries.popitem(last=False)
-            entry = self._entries[key] = _Assembly(fragment.total, now, now)
-        elif entry.total != fragment.total:
+            entry = self._entries[key] = _Assembly(
+                fragment.total, now, now, fragment.version
+            )
+        elif entry.total != fragment.total or entry.version != fragment.version:
             del self._entries[key]
-            raise TransactionConflict("inconsistent fragment count")
+            raise TransactionConflict("inconsistent fragment profile or count")
+
+        part: str | bytes
+        if fragment.version == 2:
+            if fragment.raw_data is None:
+                del self._entries[key]
+                raise CarriageError("Q2 fragment is missing raw data")
+            part = fragment.raw_data
+        else:
+            part = fragment.data
+
         existing = entry.parts.get(fragment.index)
-        if existing is not None and existing != fragment.data:
+        if existing is not None and existing != part:
             del self._entries[key]
             raise TransactionConflict("conflicting duplicate fragment")
-        entry.parts[fragment.index] = fragment.data
+        entry.parts[fragment.index] = part
         entry.last_seen = now
         self._entries.move_to_end(key)
         if len(entry.parts) != entry.total:
             return None
         del self._entries[key]
-        return decode_frame_text("".join(entry.parts[index] for index in range(entry.total)))
+
+        if entry.version == 2:
+            frame = b"".join(
+                bytes(entry.parts[index]) for index in range(entry.total)
+            )
+            try:
+                decode_frame_with_flags(frame)
+            except Exception as error:
+                raise CarriageError("invalid OpenQSP Q2 frame carriage") from error
+            return frame
+        return decode_frame_text(
+            "".join(str(entry.parts[index]) for index in range(entry.total))
+        )
 
     def __len__(self) -> int:
         return len(self._entries)
