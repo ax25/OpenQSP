@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from openqsp.protocol import SendMessage, Stored, decode_frame
+from openqsp.protocol import SendMessage, Stored, decode_frame, normalize_callsign
 
 from .adapter import OutboundPacket
 from .carriage import (
@@ -127,6 +127,7 @@ class _BurstTx:
     deadline: float = 0.0
     requested: frozenset[int] | None = None
     repair_active: bool = False
+    repair_indices: frozenset[int] | None = None
 
 
 @dataclass
@@ -292,8 +293,16 @@ class APRSAdapter(_CommitAPRSAdapter):
     def _fail_outbound(self, peer: str, tx: _BurstTx) -> None:
         if self._burst_active.get(peer) is tx:
             del self._burst_active[peer]
+        if tx.delivery is not None:
+            self.core.mark_aprs_failed(*tx.delivery)
         self.failed_packets.extend(tx.packets)
         del self.failed_packets[: -self.config.event_history_capacity]
+
+    def _refresh_aprs_presence(self, peer: str) -> None:
+        if self.router is None:
+            return
+        callsign = normalize_callsign(peer, "APRS source")
+        self.router.presence.set_aprs(callsign, peer)
 
     def _compact_stored_result(self, peer: str, transaction_id: str, now: float) -> None:
         replay = self.replay.get(peer, transaction_id, now)
@@ -334,6 +343,7 @@ class APRSAdapter(_CommitAPRSAdapter):
             if tx is None or tx.transaction_id != transaction_id:
                 return "ignored"
             if kind == "ack":
+                self._refresh_aprs_presence(peer)
                 self._complete_outbound(peer, tx)
                 return "acknowledged"
             valid_missing = frozenset(
@@ -341,8 +351,10 @@ class APRSAdapter(_CommitAPRSAdapter):
             )
             if not valid_missing:
                 return "ignored"
+            self._refresh_aprs_presence(peer)
             tx.requested = valid_missing
             tx.repair_active = True
+            tx.repair_indices = valid_missing
             return "repair-requested"
 
         try:
@@ -394,8 +406,15 @@ class APRSAdapter(_CommitAPRSAdapter):
             if tx.requested is not None:
                 indices = tuple(sorted(tx.requested))
                 tx.requested = None
-            elif tx.deadline and now >= tx.deadline and not tx.repair_active:
-                indices = tuple(range(len(tx.fragments)))
+            elif tx.deadline and now >= tx.deadline:
+                if tx.repair_active:
+                    if tx.repair_indices:
+                        indices = tuple(sorted(tx.repair_indices))
+                    else:
+                        self._fail_outbound(peer, tx)
+                        continue
+                else:
+                    indices = tuple(range(len(tx.fragments)))
             if indices is None:
                 continue
             if tx.attempts >= self.config.max_attempts:
