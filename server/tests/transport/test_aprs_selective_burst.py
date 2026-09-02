@@ -93,7 +93,7 @@ def test_missing_control_retransmits_only_requested_fragments() -> None:
     assert repaired.index == missing_index
 
 
-def test_selective_repair_does_not_fall_back_to_full_burst_on_timeout() -> None:
+def test_selective_repair_retries_only_requested_fragments_after_ack_timeout() -> None:
     adapter = SelectiveBurstAPRSAdapter(
         ServerCore(),
         config=AdapterConfig(ack_timeout=31, max_attempts=4, min_interval=0),
@@ -116,7 +116,11 @@ def test_selective_repair_does_not_fall_back_to_full_burst_on_timeout() -> None:
     assert len(repair) == 1
     assert parse_fragment(repair[0].body).index == 0
 
-    assert adapter.poll(now=32) == []
+    # If the final A2 is lost, never fall back to the complete burst: retry
+    # only the repair subset so a completed receiver can answer A2 again.
+    timeout_repair = adapter.poll(now=32)
+    assert len(timeout_repair) == 1
+    assert parse_fragment(timeout_repair[0].body).index == 0
 
     assert adapter.receive("EA3AAA", encode_missing(transaction, {0}), now=33) == (
         "repair-requested"
