@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openqsp.protocol import GetCapabilities, encode_frame
+from openqsp.protocol import GetCapabilities, SendMessage, encode_frame
 from openqsp.server import ServerCore
 from openqsp.transport.aprs import (
     AdapterConfig,
@@ -71,7 +71,13 @@ def test_selective_repair_does_not_fall_back_to_full_burst_on_timeout() -> None:
         ServerCore(),
         config=AdapterConfig(ack_timeout=31, max_attempts=4, min_interval=0),
     )
-    frame = bytes(range(160))
+    frame = encode_frame(
+        SendMessage(
+            created_at=1_700_000_000,
+            recipient="EA3BBB",
+            body="x" * 180,
+        )
+    )
     transaction = adapter.queue_frame("EA3AAA", frame)
     first = adapter.poll(now=0)
     assert len(first) > 1
@@ -83,10 +89,6 @@ def test_selective_repair_does_not_fall_back_to_full_burst_on_timeout() -> None:
     assert len(repair) == 1
     assert parse_fragment(repair[0].body).index == 0
 
-    # Reproduce the live failure: once the peer has explicitly said that only
-    # fragment 0 is missing, expiry of the normal ACK timeout must not resend
-    # the entire transaction.  The receiver will send another Q1N if repair is
-    # still required.
     assert adapter.poll(now=32) == []
 
     assert adapter.receive("EA3AAA", encode_missing(transaction, {0}), now=33) == (
@@ -125,9 +127,6 @@ def test_default_repair_grace_waits_five_seconds_after_latest_nonfinal_fragment(
 
     assert adapter.receive("EA3AAA", first.body, now=0) == "fragment"
     assert adapter.poll(now=4.99) == []
-
-    # Another non-final fragment means the transmitter may still be in the
-    # middle of the initial burst, so restart the full five-second quiet period.
     assert adapter.receive("EA3AAA", second.body, now=4.99) == "fragment"
     assert adapter.poll(now=9.98) == []
 
@@ -147,9 +146,6 @@ def test_final_fragment_shortens_missing_repair_grace_to_two_seconds() -> None:
 
     assert adapter.receive("EA3AAA", first.body, now=0) == "fragment"
     assert adapter.receive("EA3AAA", final.body, now=1) == "fragment"
-
-    # Seeing N/N tells us the initial burst is over.  We can ask for the missing
-    # middle fragments after two seconds instead of waiting the normal five.
     assert adapter.poll(now=2.99) == []
     control = adapter.poll(now=3)
 
@@ -170,11 +166,64 @@ def test_final_fragment_keeps_short_grace_after_late_fragment() -> None:
     assert adapter.receive("EA3AAA", first.body, now=0) == "fragment"
     assert adapter.receive("EA3AAA", final.body, now=1) == "fragment"
     assert adapter.receive("EA3AAA", second.body, now=1.5) == "fragment"
-
-    # Once N/N has been seen, later fragments cannot put the transaction back
-    # into the initial five-second burst window.
     assert adapter.poll(now=3.49) == []
     control = adapter.poll(now=3.5)
 
     assert len(control) == 1
     assert control[0].body == "Q1N:ABC:0004"
+
+
+def test_proactive_transaction_supersedes_unacked_replaceable_response() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(),
+        config=AdapterConfig(ack_timeout=31, max_attempts=5, min_interval=2),
+    )
+    stale = adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        response_batch=("EA3AAA", "REQ"),
+        response_supersedable=True,
+    )
+    first = adapter.poll(now=0)
+    assert first
+    assert adapter.pending_count == len(first)
+
+    proactive = adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        proactive=True,
+    )
+
+    assert adapter.receive("EA3AAA", encode_burst_ack(stale), now=1) == "ignored"
+    assert adapter.poll(now=1) == []
+    second = adapter.poll(now=2)
+
+    assert second
+    assert {
+        parse_fragment(packet.body).transaction_id for packet in second
+    } == {proactive}
+
+
+def test_proactive_transaction_does_not_supersede_nonreplaceable_response() -> None:
+    adapter = SelectiveBurstAPRSAdapter(
+        ServerCore(),
+        config=AdapterConfig(ack_timeout=31, max_attempts=5, min_interval=2),
+    )
+    protected = adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        response_batch=("EA3AAA", "SEND"),
+        response_supersedable=False,
+    )
+    first = adapter.poll(now=0)
+    assert first
+
+    adapter.queue_frame(
+        "EA3AAA",
+        encode_frame(GetCapabilities()),
+        proactive=True,
+    )
+
+    assert adapter.poll(now=2) == []
+    assert adapter.receive("EA3AAA", encode_burst_ack(protected), now=2) == "acknowledged"
+    assert adapter.poll(now=2)

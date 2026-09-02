@@ -129,6 +129,29 @@ class APRSAdapter(_CommitAPRSAdapter):
     def pending_count(self) -> int:
         return sum(len(tx.fragments) for tx in self._burst_active.values())
 
+    def _supersede_active_response_for_proactive(self, peer: str) -> None:
+        """Let new proactive traffic replace a stale, replaceable response batch.
+
+        A response such as END(GET_NEW_MESSAGES) can remain active for the full
+        ACK retry window when its Q1A is lost.  That response must not block a
+        newly routed unsolicited message for the same peer.  Non-replaceable
+        responses (notably SEND_MESSAGE/STORED) remain protected.
+        """
+        active = self._burst_active.get(peer)
+        if (
+            active is None
+            or active.response_batch is None
+            or not active.response_supersedable
+        ):
+            return
+        stale_batch = active.response_batch
+        del self._burst_active[peer]
+        self._burst_queue = [
+            tx
+            for tx in self._burst_queue
+            if not (tx.peer == peer and tx.response_batch == stale_batch)
+        ]
+
     def queue_frame(
         self,
         peer: str,
@@ -140,6 +163,8 @@ class APRSAdapter(_CommitAPRSAdapter):
         response_supersedable: bool = True,
     ) -> str:
         self.validate_peer(peer)
+        if proactive:
+            self._supersede_active_response_for_proactive(peer)
         transaction_id = self._allocate(peer, transaction=True)
         fragments = fragment_frame(frame, transaction_id)
         current_load = self.queued_count + self.pending_count
