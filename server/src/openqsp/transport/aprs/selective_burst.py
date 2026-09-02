@@ -375,6 +375,13 @@ class APRSAdapter(_CommitAPRSAdapter):
 
         disposition = super().receive(peer, body, now=now)
         if disposition in {"completed", "replayed"}:
+            self._immediate.append(
+                OutboundPacket(
+                    self.service_callsign,
+                    peer,
+                    encode_burst_ack(fragment.transaction_id),
+                )
+            )
             self._compact_stored_result(peer, fragment.transaction_id, now)
         if disposition in {"completed", "replayed", "invalid", "conflict"}:
             self._rx_progress.pop(key, None)
