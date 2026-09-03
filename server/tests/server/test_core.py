@@ -60,7 +60,7 @@ def test_authenticated_identity_is_separate_and_reaches_operation_handler():
 @pytest.mark.parametrize(
     "response",
     (
-        Message(1, 3, "K1ABC", "N0CALL", "body"),
+        Message(1, 1, 3, "K1ABC", "N0CALL", "body"),
         BulletinHeader(1, 3, "K1ABC", "title"),
         Bulletin(2, 3, "K1ABC", "title", "body"),
         End(Operation.GET_NEW_MESSAGES, 0, 0, False),
