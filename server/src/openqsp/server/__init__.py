@@ -1,6 +1,7 @@
 """Transport-independent request handling for an OpenQSP node."""
 
-from .core import RequestContext, ServerCore
+from .core import RequestContext
+from .get_message_core import ServerCore
 from .presence import ActiveTransport, DeliveryRouter, PresenceRegistry, UserPresence
 from .sessions import AuthenticatedSession, SessionRegistry
 
