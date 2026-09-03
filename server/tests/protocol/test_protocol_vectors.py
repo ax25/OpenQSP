@@ -26,7 +26,7 @@ CANONICAL_VECTORS = [
     ("01 01 00 10 65 00 00 00 06 45 41 31 41 42 43 04 48 6F 6C 61", SendMessage(0x65000000, "EA1ABC", "Hola")),
     ("01 44 00 00", Stored()),
     ("01 02 00 05 00 00 00 7C 05", GetNewMessages(124, 5)),
-    ("01 40 00 1B 00 00 00 7D 65 00 00 00 06 45 41 33 47 4E 55 06 45 41 31 41 42 43 04 48 6F 6C 61", Message(125, 0x65000000, "EA3GNU", "EA1ABC", "Hola")),
+    ("01 40 00 1F 00 00 00 7D 00 00 00 07 65 00 00 00 06 45 41 33 47 4E 55 06 45 41 31 41 42 43 04 48 6F 6C 61", Message(125, 7, 0x65000000, "EA3GNU", "EA1ABC", "Hola")),
     ("01 43 00 07 02 01 00 00 00 7D 00", End(Operation.GET_NEW_MESSAGES, 1, 125, False)),
     ("01 03 00 05 00 00 00 F5 05", GetNewBulletins(245, 5)),
     ("01 41 00 18 00 00 00 F6 65 00 00 00 06 45 41 31 41 42 43 08 54 65 73 74 20 56 48 46", BulletinHeader(246, 0x65000000, "EA1ABC", "Test VHF")),
@@ -56,7 +56,8 @@ def test_retrieval_max_outside_limits(maximum: int) -> None:
 
 
 @pytest.mark.parametrize("model", [
-    GetBulletin(0), Message(0, 1, "EA1ABC", "EA2ABC", "x"),
+    GetBulletin(0), Message(0, 1, 1, "EA1ABC", "EA2ABC", "x"),
+    Message(1, 0, 1, "EA1ABC", "EA2ABC", "x"),
     BulletinHeader(0, 1, "EA1ABC", "x"),
     SendMessage(0, "EA1ABC", "x"), Bulletin(1, 0, "EA1ABC", "x", "x"),
 ])
@@ -131,9 +132,10 @@ def send(*, created_at=1, recipient=b"EA1ABC", body=b"x") -> bytes:
             + bytes([len(recipient)]) + recipient + bytes([len(body)]) + body)
 
 
-def message(*, sequence=1, created_at=1, author=b"EA1ABC",
+def message(*, sequence=1, conversation_sequence=1, created_at=1, author=b"EA1ABC",
             recipient=b"EA2ABC", body=b"x") -> bytes:
-    return (sequence.to_bytes(4, "big") + created_at.to_bytes(4, "big") + bytes([len(author)]) + author
+    return (sequence.to_bytes(4, "big") + conversation_sequence.to_bytes(4, "big")
+            + created_at.to_bytes(4, "big") + bytes([len(author)]) + author
             + bytes([len(recipient)]) + recipient + bytes([len(body)]) + body)
 
 
@@ -172,6 +174,7 @@ def test_legacy_u64_get_bulletin_frame_is_rejected() -> None:
 @pytest.mark.parametrize(("operation", "payload"), [
     (Operation.SEND_MESSAGE, send(created_at=0)),
     (Operation.MESSAGE, message(sequence=0)),
+    (Operation.MESSAGE, message(conversation_sequence=0)),
     (Operation.MESSAGE, message(created_at=0)),
     (Operation.BULLETIN_HEADER, header(sequence=0)),
     (Operation.BULLETIN_HEADER, header(created_at=0)),
@@ -298,7 +301,7 @@ def test_unsigned_extremes_and_permitted_zero() -> None:
 @pytest.mark.parametrize("sequence", [1, 2**32 - 1])
 def test_object_sequence_boundaries(sequence: int) -> None:
     models = [
-        Message(sequence, 1, "EA1ABC", "EA2ABC", "x"),
+        Message(sequence, sequence, 1, "EA1ABC", "EA2ABC", "x"),
         BulletinHeader(sequence, 1, "EA1ABC", "x"),
         Bulletin(sequence, 1, "EA1ABC", "x", "x"),
         GetBulletin(sequence),
@@ -309,7 +312,9 @@ def test_object_sequence_boundaries(sequence: int) -> None:
 
 @pytest.mark.parametrize("model", [
     GetNewMessages(2**32, 1), End(Operation.GET_NEW_MESSAGES, 0, 2**32, False),
-    Message(2**32, 1, "EA1ABC", "EA2ABC", "x"), GetBulletin(2**32),
+    Message(2**32, 1, 1, "EA1ABC", "EA2ABC", "x"),
+    Message(1, 2**32, 1, "EA1ABC", "EA2ABC", "x"),
+    GetBulletin(2**32),
 ])
 def test_u32_values_above_range_are_rejected(model: object) -> None:
     with pytest.raises(InvalidFieldError):
