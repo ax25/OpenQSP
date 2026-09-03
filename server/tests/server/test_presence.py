@@ -5,7 +5,7 @@ from openqsp.server import ActiveTransport, DeliveryRouter, PresenceRegistry
 
 
 def message() -> Message:
-    return Message(1, 100, "K1ABC", "EA3GNU", "hello")
+    return Message(1, 1, 100, "K1ABC", "EA3GNU", "hello")
 
 
 def test_absent_recipient_stays_pending_without_delivery_attempt() -> None:

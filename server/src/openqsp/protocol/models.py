@@ -43,6 +43,7 @@ class Capabilities:
 @dataclass(frozen=True)
 class Message:
     sequence: int
+    conversation_sequence: int
     created_at: int
     author: str
     recipient: str

@@ -42,9 +42,7 @@ def test_private_identity_retry_conflict_and_mailbox_isolation(tmp_path):
     assert not hasattr(original, "author")
     assert exchange(core, "K1ABC", original) == [Stored()]
     # Simulate losing that response and submitting the exact encoded request again.
-    assert exchange(core, "K1ABC", original) == [
-        Stored()
-    ]
+    assert exchange(core, "K1ABC", original) == [Stored()]
     assert exchange(
         core, "K1ABC", SendMessage(1_786_200_000, "EA3GNU", "changed")
     ) == [Stored()]
@@ -56,13 +54,13 @@ def test_private_identity_retry_conflict_and_mailbox_isolation(tmp_path):
     n0call = exchange(core, "N0CALL", GetNewMessages(0, 20))
     outsider = exchange(core, "F4XYZ", GetNewMessages(0, 20))
     assert ea3gnu == [
-        Message(1, 1_786_200_000, "K1ABC", "EA3GNU", "Hello"),
-        Message(2, 1_786_200_000, "K1ABC", "EA3GNU", "Hello"),
-        Message(3, 1_786_200_000, "K1ABC", "EA3GNU", "changed"),
+        Message(1, 1, 1_786_200_000, "K1ABC", "EA3GNU", "Hello"),
+        Message(2, 2, 1_786_200_000, "K1ABC", "EA3GNU", "Hello"),
+        Message(3, 3, 1_786_200_000, "K1ABC", "EA3GNU", "changed"),
         End(Operation.GET_NEW_MESSAGES, 3, 3, False),
     ]
     assert n0call == [
-        Message(1, 1_786_200_001, "K1ABC", "N0CALL", "private"),
+        Message(1, 1, 1_786_200_001, "K1ABC", "N0CALL", "private"),
         End(Operation.GET_NEW_MESSAGES, 1, 1, False),
     ]
     assert outsider == [End(Operation.GET_NEW_MESSAGES, 0, 0, False)]
@@ -79,6 +77,7 @@ def test_incremental_sync_pagination_and_end_cursor_safety(tmp_path):
 
     first = exchange(core, "EA3GNU", GetNewMessages(0, 2))
     assert [item.sequence for item in first[:-1]] == [1, 2]
+    assert [item.conversation_sequence for item in first[:-1]] == [1, 2]
     assert first[-1] == End(Operation.GET_NEW_MESSAGES, 2, 2, True)
     # Item sequences are not cursors: only the terminating END authorizes progress.
     assert all(not hasattr(item, "next_since") for item in first[:-1])
@@ -87,6 +86,7 @@ def test_incremental_sync_pagination_and_end_cursor_safety(tmp_path):
 
     second = exchange(core, "EA3GNU", GetNewMessages(cursor, 2))
     assert [item.sequence for item in second[:-1]] == [3, 4]
+    assert [item.conversation_sequence for item in second[:-1]] == [3, 4]
     assert second[-1] == End(Operation.GET_NEW_MESSAGES, 2, 4, False)
     assert {item.sequence for item in first[:-1] + second[:-1]} == {1, 2, 3, 4}
 
@@ -95,7 +95,7 @@ def test_incremental_sync_pagination_and_end_cursor_safety(tmp_path):
     ]
     exchange(core, "K1ABC", SendMessage(105, "EA3GNU", "message 5"))
     assert exchange(core, "EA3GNU", GetNewMessages(4, 20)) == [
-        Message(5, 105, "K1ABC", "EA3GNU", "message 5"),
+        Message(5, 5, 105, "K1ABC", "EA3GNU", "message 5"),
         End(Operation.GET_NEW_MESSAGES, 1, 5, False),
     ]
 
@@ -137,10 +137,9 @@ def test_restart_preserves_messages_retries_sync_and_bulletins(tmp_path):
     )
 
     restarted, _ = node(path)
-    assert exchange(restarted, "K1ABC", request) == [
-        Stored()
-    ]
-    assert exchange(restarted, "EA3GNU", GetNewMessages(0, 20))[0] == Message(1, 800, "K1ABC", "EA3GNU", "durable"
+    assert exchange(restarted, "K1ABC", request) == [Stored()]
+    assert exchange(restarted, "EA3GNU", GetNewMessages(0, 20))[0] == Message(
+        1, 1, 800, "K1ABC", "EA3GNU", "durable"
     )
     assert exchange(restarted, "EA3GNU", GetBulletin(1)) == [
         Bulletin(1, 801, "EA9SRC", "Durable", "Still here")

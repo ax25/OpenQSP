@@ -24,7 +24,6 @@ def _database(tmp_path, name="node.db") -> Database:
 
 def _store_message(store, sequence, recipient, *, author="EA9SRC"):
     outcome = store.store_message(
-
         created_at=1_000 + sequence,
         author=author,
         recipient=recipient,
@@ -52,12 +51,34 @@ def test_single_message_maps_every_persisted_field_then_end(tmp_path):
     responses = _responses(ServerCore(message_store=store))
 
     assert responses == [
-        Message(persisted.sequence, persisted.created_at,
+        Message(
+            persisted.sequence,
+            1,
+            persisted.created_at,
             persisted.author,
             persisted.recipient,
             persisted.body,
         ),
         End(Operation.GET_NEW_MESSAGES, 1, sequence, False),
+    ]
+
+
+def test_conversation_sequence_is_independent_per_author(tmp_path):
+    store = MessageStore(_database(tmp_path))
+    _store_message(store, 1, "EA3GNU", author="EA1AAA")
+    _store_message(store, 2, "EA3GNU", author="EA2BBB")
+    _store_message(store, 3, "EA3GNU", author="EA1AAA")
+    _store_message(store, 4, "EA3GNU", author="EA2BBB")
+    _store_message(store, 5, "EA3GNU", author="EA1AAA")
+
+    responses = _responses(ServerCore(message_store=store))[:-1]
+
+    assert [(m.author, m.sequence, m.conversation_sequence) for m in responses] == [
+        ("EA1AAA", 1, 1),
+        ("EA2BBB", 2, 1),
+        ("EA1AAA", 3, 2),
+        ("EA2BBB", 4, 2),
+        ("EA1AAA", 5, 3),
     ]
 
 
@@ -70,6 +91,7 @@ def test_multiple_messages_preserve_ascending_storage_order(tmp_path):
     responses = _responses(ServerCore(message_store=store))
 
     assert [response.sequence for response in responses[:-1]] == sequences
+    assert [response.conversation_sequence for response in responses[:-1]] == [1, 2, 3]
     assert all(isinstance(response, Message) for response in responses[:-1])
     assert responses[-1] == End(Operation.GET_NEW_MESSAGES, 3, sequences[-1], False)
 
@@ -85,9 +107,11 @@ def test_authenticated_recipient_isolation_with_invisible_global_sequences(tmp_p
     abc = _responses(core, callsign="EA3ABC")
 
     assert [message.sequence for message in gnu[:-1]] == [first, last]
+    assert [message.conversation_sequence for message in gnu[:-1]] == [1, 2]
     assert [message.recipient for message in gnu[:-1]] == ["EA3GNU", "EA3GNU"]
     assert gnu[-1] == End(Operation.GET_NEW_MESSAGES, 2, last, False)
     assert [message.sequence for message in abc[:-1]] == [middle]
+    assert [message.conversation_sequence for message in abc[:-1]] == [1]
     assert [message.recipient for message in abc[:-1]] == ["EA3ABC"]
     assert abc[-1] == End(Operation.GET_NEW_MESSAGES, 1, middle, False)
 
@@ -168,4 +192,5 @@ def test_retrieval_survives_database_restart(tmp_path):
     responses = _responses(ServerCore(message_store=MessageStore(reopened)))
 
     assert [message.sequence for message in responses[:-1]] == sequences
+    assert [message.conversation_sequence for message in responses[:-1]] == [1, 2]
     assert responses[-1] == End(Operation.GET_NEW_MESSAGES, 2, sequences[-1], False)

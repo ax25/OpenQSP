@@ -303,7 +303,9 @@ def _encode_capabilities(obj: ProtocolObject) -> bytes:
 
 def _decode_message(payload: bytes) -> Message:
     reader = _Reader(payload)
-    sequence, created_at = reader.u32("sequence"), reader.u32("created_at")
+    sequence = reader.u32("sequence")
+    conversation_sequence = reader.u32("conversation_sequence")
+    created_at = reader.u32("created_at")
     author = _decode_callsign(reader.prefixed("author"), "author")
     recipient = _decode_callsign(reader.prefixed("recipient"), "recipient")
     body = _decode_text(
@@ -314,8 +316,11 @@ def _decode_message(payload: bytes) -> Message:
     )
     reader.finish()
     _integer(sequence, 32, "sequence", nonzero=True)
+    _integer(conversation_sequence, 32, "conversation_sequence", nonzero=True)
     _integer(created_at, 32, "created_at", nonzero=True)
-    return Message(sequence, created_at, author, recipient, body)
+    return Message(
+        sequence, conversation_sequence, created_at, author, recipient, body
+    )
 
 
 def _encode_message(obj: ProtocolObject) -> bytes:
@@ -328,6 +333,11 @@ def _encode_message(obj: ProtocolObject) -> bytes:
     )
     return (
         _u32(value.sequence, "sequence", nonzero=True)
+        + _u32(
+            value.conversation_sequence,
+            "conversation_sequence",
+            nonzero=True,
+        )
         + _u32(value.created_at, "created_at", nonzero=True)
         + _prefix(author)
         + _prefix(recipient)

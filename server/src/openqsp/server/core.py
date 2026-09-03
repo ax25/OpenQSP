@@ -185,6 +185,7 @@ class ServerCore:
         if created:
             event = Message(
                 stored.sequence,
+                self._message_store.conversation_sequence(stored),
                 stored.created_at,
                 stored.author,
                 stored.recipient,
@@ -346,6 +347,7 @@ class ServerCore:
         responses: list[ProtocolObject] = [
             Message(
                 message.sequence,
+                self._message_store.conversation_sequence(message),
                 message.created_at,
                 message.author,
                 message.recipient,

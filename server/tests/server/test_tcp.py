@@ -87,8 +87,6 @@ def test_maximum_size_valid_request_does_not_stall_stream_reader(tmp_path):
                 )
             )
 
-            # Separate writes exercise StreamReader's buffering and flow
-            # control while readexactly() waits for the complete payload.
             for offset in range(0, len(request), 16):
                 writer.write(request[offset : offset + 16])
                 await writer.drain()
@@ -198,7 +196,7 @@ def test_state_survives_disconnect_and_reconnect_with_same_stores(tmp_path):
             await recipient.drain()
             message = decode_frame(await _read_frame(reader))
             end = decode_frame(await _read_frame(reader))
-            assert message == Message(1, 100, "K1ABC", "N0CALL", "durable")
+            assert message == Message(1, 1, 100, "K1ABC", "N0CALL", "durable")
             assert end == End(Operation.GET_NEW_MESSAGES, 1, 1, False)
             recipient.close()
             await recipient.wait_closed()
