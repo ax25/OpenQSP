@@ -46,7 +46,7 @@ def test_nonzero_version_01_flags_are_invalid() -> None:
 
 
 @pytest.mark.parametrize("model", [
-    Message(1, 3, "EA3AAA", "EA3BBB", "proactive"),
+    Message(1, 1, 3, "EA3AAA", "EA3BBB", "proactive"),
     BulletinHeader(1, 3, "EA3AAA", "proactive"),
 ])
 def test_unsolicited_flag_round_trips_only_through_server_frame_decoder(
