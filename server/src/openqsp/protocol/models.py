@@ -35,6 +35,12 @@ class GetCapabilities:
 
 
 @dataclass(frozen=True)
+class GetMessage:
+    peer: str
+    conversation_sequence: int
+
+
+@dataclass(frozen=True)
 class Capabilities:
     protocol_version: int
     capabilities: int
