@@ -85,7 +85,7 @@ MODEL_CASES = [
     (GetNewMessages, (3, 4), ("since", "max")),
     (GetNewBulletins, (5, 6), ("since", "max")),
     (GetBulletin, (7,), ("sequence",)),
-    (Message, (8, 10, "EA3GNU", "EA1ABC", "Hola"), ("sequence", "created_at", "author", "recipient", "body")),
+    (Message, (8, 9, 10, "EA3GNU", "EA1ABC", "Hola"), ("sequence", "conversation_sequence", "created_at", "author", "recipient", "body")),
     (BulletinHeader, (11, 13, "EA1ABC", "Test VHF"), ("sequence", "created_at", "author", "title")),
     (Bulletin, (14, 15, "EA1ABC", "Test VHF", "Actividad domingo"), ("sequence", "created_at", "author", "title", "body")),
     (End, (Operation.GET_NEW_MESSAGES, 1, 16, False), ("request_operation", "returned_count", "next_since", "has_more")),
