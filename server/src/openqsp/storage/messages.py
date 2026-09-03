@@ -287,6 +287,25 @@ class MessageStore:
             ).fetchone()
         return None if row is None else _stored_message(row)
 
+    def conversation_sequence(self, value: StoredMessage) -> int:
+        """Return this message's ordinal within its incoming conversation.
+
+        Conversation sequences are scoped by ``(recipient, author)`` while
+        ``StoredMessage.sequence`` remains the recipient mailbox cursor.  The
+        value is derived from durable mailbox order so existing historical
+        messages acquire stable conversation sequences without a schema migration.
+        """
+        with closing(self._database.connect()) as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) FROM messages
+                   WHERE recipient=? AND author=? AND mailbox_sequence<=?""",
+                (value.recipient, value.author, value.sequence),
+            ).fetchone()
+        count = 0 if row is None else int(row[0])
+        if count <= 0 or count > MAX_U32:
+            raise StorageIntegrityError("message conversation sequence is invalid")
+        return count
+
     def api_high_water(self) -> int:
         with closing(self._database.connect()) as connection:
             return int(
