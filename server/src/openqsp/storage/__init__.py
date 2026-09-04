@@ -8,6 +8,7 @@ from ._common import (
     require_u32,
 )
 from .accounts import AccountExistsError, AccountStore, InvalidCredentialsError
+from .aprs_transactions import APRSTransactionSequenceStore
 from .bulletins import (
     BulletinPage,
     BulletinStore,
@@ -27,6 +28,7 @@ from .migrations import LATEST_SCHEMA_VERSION
 __all__ = [
     "LATEST_SCHEMA_VERSION",
     "MAX_U32",
+    "APRSTransactionSequenceStore",
     "AccountExistsError",
     "AccountStore",
     "BulletinPage",
