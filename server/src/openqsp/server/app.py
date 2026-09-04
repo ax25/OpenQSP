@@ -10,8 +10,14 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from openqsp.storage import AccountStore, BulletinStore, Database, MessageStore
-from openqsp.transport.aprs import SelectiveBurstAPRSAdapter as APRSAdapter
+from openqsp.storage import (
+    APRSTransactionSequenceStore,
+    AccountStore,
+    BulletinStore,
+    Database,
+    MessageStore,
+)
+from openqsp.transport.aprs import PersistentSelectiveBurstAPRSAdapter as APRSAdapter
 from openqsp.transport.aprs.aprsis import APRSISClient, APRSISConfig
 
 from .config import ConfigurationError, ServerConfig, load_dotenv
@@ -40,6 +46,7 @@ class OpenQSPServer:
         self.message_store = MessageStore(self.database)
         self.bulletin_store = BulletinStore(self.database)
         self.account_store = AccountStore(self.database)
+        self.aprs_transaction_store = APRSTransactionSequenceStore(self.database)
         self.core = ServerCore(
             message_store=self.message_store, bulletin_store=self.bulletin_store
         )
@@ -77,6 +84,7 @@ class OpenQSPServer:
                 self.core,
                 service_callsign=self.config.aprs_callsign,
                 router=self.delivery_router,
+                transaction_sequence_store=self.aprs_transaction_store,
             )
             aprs_config = APRSISConfig(
                 callsign=self.config.aprs_callsign,
