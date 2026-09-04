@@ -13,6 +13,7 @@ from .carriage import (
     parse_fragment,
 )
 from .commit_adapter import APRSAdapter
+from .persistent_transactions import APRSAdapter as PersistentSelectiveBurstAPRSAdapter
 from .selective_burst import (
     encode_burst_ack,
     encode_missing,
@@ -24,6 +25,7 @@ from .selective_burst_guarded import APRSAdapter as SelectiveBurstAPRSAdapter
 
 __all__ = [
     "APRSAdapter",
+    "PersistentSelectiveBurstAPRSAdapter",
     "SelectiveBurstAPRSAdapter",
     "APRSFragment",
     "AdapterConfig",
