@@ -7,6 +7,7 @@ import heapq
 from openqsp.protocol import (
     GetBulletin,
     GetCapabilities,
+    GetMessage,
     GetNewBulletins,
     GetNewMessages,
     Message,
@@ -182,6 +183,7 @@ class APRSAdapter(_BaseAPRSAdapter):
                 GetNewBulletins,
                 GetBulletin,
                 GetCapabilities,
+                GetMessage,
             ),
         ):
             if commit_ack:

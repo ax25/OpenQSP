@@ -15,7 +15,7 @@ from openqsp.transport.aprs import SelectiveBurstAPRSAdapter as APRSAdapter
 from openqsp.transport.aprs.aprsis import APRSISClient, APRSISConfig
 
 from .config import ConfigurationError, ServerConfig, load_dotenv
-from .core import ServerCore
+from .get_message_core import ServerCore
 from .presence import DeliveryRouter
 from .tcp import TCPServer
 

@@ -32,6 +32,7 @@ class Operation(IntEnum):
     GET_NEW_BULLETINS = 0x03
     GET_BULLETIN = 0x04
     GET_CAPABILITIES = 0x05
+    GET_MESSAGE = 0x06
 
     MESSAGE = 0x40
     BULLETIN_HEADER = 0x41

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openqsp.protocol import SendMessage, encode_frame
+from openqsp.protocol import GetMessage, SendMessage, encode_frame
 from openqsp.transport.aprs.carriage import (
     MAX_APRS_BODY,
     base91_decode,
@@ -76,3 +76,15 @@ def test_q2_reduces_max_send_message_to_five_fragments() -> None:
     assert len(frame) == 224
     assert len(fragments) == 5
     assert all(len(fragment.body) <= MAX_APRS_BODY for fragment in fragments)
+
+
+def test_q2_accepts_get_message_core_frame() -> None:
+    frame = encode_frame(GetMessage(peer="EA3ABC", conversation_sequence=11))
+
+    fragments = fragment_frame_v2(frame, "053")
+
+    assert len(fragments) == 1
+    decoded = parse_fragment(fragments[0].body)
+    assert decoded.version == 2
+    assert decoded.transaction_id == "053"
+    assert decoded.raw_data == frame
